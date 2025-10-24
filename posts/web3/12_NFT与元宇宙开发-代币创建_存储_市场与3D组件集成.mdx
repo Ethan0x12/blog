@@ -1,0 +1,3276 @@
+---
+title: NFT与元宇宙开发：代币创建、存储、市场与3D组件集成
+publishedAt: 2025-10-23
+summary: "全面介绍NFT与元宇宙开发技术栈，包括ERC-721/1155代币标准实现、去中心化存储方案、NFT市场功能开发以及3D/VR/AR元宇宙组件集成"
+---
+
+# NFT与元宇宙开发完整指南
+
+随着区块链技术的发展，非同质化代币(NFT)和元宇宙概念正在重塑数字资产和虚拟世界的未来。本文将深入探讨NFT与元宇宙开发的核心技术，从代币标准到元宇宙组件，为开发者提供全面的技术实现指南。
+
+## 1. NFT铸造与代币标准
+
+### 1.1 ERC-721标准实现
+
+ERC-721是第一个广泛采用的NFT标准，定义了非同质化代币的基本功能接口。
+
+```solidity
+// 标准ERC-721实现示例
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/Counters.sol";
+
+contract MyNFT is ERC721, Ownable {
+    using Counters for Counters.Counter;
+    Counters.Counter private _tokenIdCounter;
+    
+    // 基础URI，用于元数据访问
+    string private _baseTokenURI;
+    
+    // 最大铸造数量
+    uint256 public maxSupply;
+    
+    // 铸造价格
+    uint256 public mintPrice;
+    
+    // 铸造事件
+    event NFTMinted(address indexed owner, uint256 indexed tokenId, string tokenURI);
+    
+    constructor(
+        string memory name,
+        string memory symbol,
+        string memory baseTokenURI,
+        uint256 _maxSupply,
+        uint256 _mintPrice
+    ) ERC721(name, symbol) {
+        _baseTokenURI = baseTokenURI;
+        maxSupply = _maxSupply;
+        mintPrice = _mintPrice;
+    }
+    
+    // 重写基础URI函数
+    function _baseURI() internal view override returns (string memory) {
+        return _baseTokenURI;
+    }
+    
+    // 设置新的基础URI
+    function setBaseURI(string calldata newBaseURI) external onlyOwner {
+        _baseTokenURI = newBaseURI;
+    }
+    
+    // 公开铸造函数
+    function mint() external payable {
+        require(msg.value >= mintPrice, "Insufficient funds");
+        require(_tokenIdCounter.current() < maxSupply, "Max supply reached");
+        
+        _tokenIdCounter.increment();
+        uint256 newTokenId = _tokenIdCounter.current();
+        
+        _safeMint(msg.sender, newTokenId);
+        
+        string memory tokenURI = tokenURI(newTokenId);
+        emit NFTMinted(msg.sender, newTokenId, tokenURI);
+    }
+    
+    // 批量铸造函数（仅所有者）
+    function mintBatch(address to, uint256 quantity) external onlyOwner {
+        require(_tokenIdCounter.current() + quantity <= maxSupply, "Max supply would be exceeded");
+        
+        for (uint256 i = 0; i < quantity; i++) {
+            _tokenIdCounter.increment();
+            uint256 newTokenId = _tokenIdCounter.current();
+            
+            _safeMint(to, newTokenId);
+            
+            string memory tokenURI = tokenURI(newTokenId);
+            emit NFTMinted(to, newTokenId, tokenURI);
+        }
+    }
+    
+    // 提取合约资金（仅所有者）
+    function withdraw() external onlyOwner {
+        uint256 balance = address(this).balance;
+        require(balance > 0, "No funds to withdraw");
+        
+        payable(owner()).transfer(balance);
+    }
+    
+    // 获取当前铸造数量
+    function totalSupply() public view returns (uint256) {
+        return _tokenIdCounter.current();
+    }
+}
+```
+
+### 1.2 ERC-1155标准实现
+
+ERC-1155是更高效的多代币标准，支持同质化和非同质化代币的混合使用。
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/Counters.sol";
+
+contract MyERC1155 is ERC1155, Ownable {
+    using Counters for Counters.Counter;
+    Counters.Counter private _tokenIdCounter;
+    
+    // 代币名称
+    string public name;
+    
+    // 代币符号
+    string public symbol;
+    
+    // 代币元数据URI
+    mapping(uint256 => string) private _tokenURIs;
+    
+    // 代币最大供应量
+    mapping(uint256 => uint256) private _maxSupply;
+    
+    // 代币铸造价格
+    mapping(uint256 => uint256) private _tokenPrices;
+    
+    // 代币是否可铸造
+    mapping(uint256 => bool) private _mintable;
+    
+    // 事件定义
+    event TokenCreated(uint256 indexed tokenId, string tokenURI, uint256 maxSupply, uint256 price);
+    event NFTMinted(address indexed owner, uint256 indexed tokenId, uint256 amount);
+    
+    constructor(string memory _name, string memory _symbol) ERC1155("") {
+        name = _name;
+        symbol = _symbol;
+    }
+    
+    // 创建新的NFT类型
+    function createToken(
+        string memory tokenURI,
+        uint256 maxSupply,
+        uint256 price
+    ) external onlyOwner returns (uint256) {
+        _tokenIdCounter.increment();
+        uint256 newTokenId = _tokenIdCounter.current();
+        
+        _tokenURIs[newTokenId] = tokenURI;
+        _maxSupply[newTokenId] = maxSupply;
+        _tokenPrices[newTokenId] = price;
+        _mintable[newTokenId] = true;
+        
+        emit TokenCreated(newTokenId, tokenURI, maxSupply, price);
+        return newTokenId;
+    }
+    
+    // 铸造NFT
+    function mintNFT(uint256 tokenId) external payable {
+        require(_mintable[tokenId], "Token not mintable");
+        require(msg.value >= _tokenPrices[tokenId], "Insufficient funds");
+        require(balanceOf(msg.sender, tokenId) < _maxSupply[tokenId], "Max supply reached for this address");
+        
+        _mint(msg.sender, tokenId, 1, "");
+        emit NFTMinted(msg.sender, tokenId, 1);
+    }
+    
+    // 批量铸造（仅所有者）
+    function mintBatch(address to, uint256[] memory tokenIds, uint256[] memory amounts) external onlyOwner {
+        require(tokenIds.length == amounts.length, "Arrays length mismatch");
+        
+        for (uint256 i = 0; i < tokenIds.length; i++) {
+            uint256 tokenId = tokenIds[i];
+            uint256 amount = amounts[i];
+            
+            require(_mintable[tokenId], "Token not mintable");
+            require(balanceOf(to, tokenId) + amount <= _maxSupply[tokenId], "Max supply would be exceeded");
+        }
+        
+        _mintBatch(to, tokenIds, amounts, "");
+        
+        for (uint256 i = 0; i < tokenIds.length; i++) {
+            emit NFTMinted(to, tokenIds[i], amounts[i]);
+        }
+    }
+    
+    // 重写URI获取函数
+    function uri(uint256 tokenId) public view override returns (string memory) {
+        return _tokenURIs[tokenId];
+    }
+    
+    // 更新代币URI
+    function setTokenURI(uint256 tokenId, string calldata newURI) external onlyOwner {
+        _tokenURIs[tokenId] = newURI;
+        emit URI(newURI, tokenId);
+    }
+    
+    // 设置代币可铸造状态
+    function setMintable(uint256 tokenId, bool mintable) external onlyOwner {
+        _mintable[tokenId] = mintable;
+    }
+    
+    // 设置代币价格
+    function setTokenPrice(uint256 tokenId, uint256 price) external onlyOwner {
+        _tokenPrices[tokenId] = price;
+    }
+    
+    // 提取资金
+    function withdraw() external onlyOwner {
+        payable(owner()).transfer(address(this).balance);
+    }
+}
+```
+
+### 1.3 高级铸造功能
+
+#### 延迟铸造(Lazy Minting)
+
+延迟铸造允许用户在需要时才支付铸造费用，节省gas成本。
+
+```solidity
+// 延迟铸造实现
+contract LazyNFT is ERC721, Ownable {
+    using Counters for Counters.Counter;
+    Counters.Counter private _tokenIdCounter;
+    
+    // 签名验证所需的参数结构
+    struct MintParams {
+        address to;
+        uint256 tokenId;
+        string tokenURI;
+        uint256 timestamp;
+        uint256 price;
+    }
+    
+    // 防止重放攻击的已使用签名映射
+    mapping(bytes => bool) private _usedSignatures;
+    
+    constructor(string memory name, string memory symbol) ERC721(name, symbol) {}
+    
+    // 使用签名进行延迟铸造
+    function mintWithSignature(
+        address to,
+        uint256 tokenId,
+        string calldata tokenURI,
+        uint256 timestamp,
+        uint256 price,
+        bytes calldata signature
+    ) external payable {
+        // 验证支付金额
+        require(msg.value >= price, "Insufficient funds");
+        
+        // 验证时间戳未过期（例如15分钟内有效）
+        require(block.timestamp <= timestamp + 15 minutes, "Signature expired");
+        
+        // 验证签名未被使用
+        require(!_usedSignatures[signature], "Signature already used");
+        
+        // 构建消息哈希
+        bytes32 messageHash = keccak256(abi.encodePacked(
+            to,
+            tokenId,
+            tokenURI,
+            timestamp,
+            price
+        ));
+        
+        // 转换为以太坊签名格式
+        bytes32 ethSignedMessageHash = getEthSignedMessageHash(messageHash);
+        
+        // 验证签名者是合约所有者
+        address signer = recoverSigner(ethSignedMessageHash, signature);
+        require(signer == owner(), "Invalid signature");
+        
+        // 标记签名为已使用
+        _usedSignatures[signature] = true;
+        
+        // 铸造NFT
+        _safeMint(to, tokenId);
+        
+        // 设置元数据
+        _setTokenURI(tokenId, tokenURI);
+    }
+    
+    // 生成以太坊签名消息哈希
+    function getEthSignedMessageHash(bytes32 messageHash) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked(
+            "\x19Ethereum Signed Message:\n32",
+            messageHash
+        ));
+    }
+    
+    // 从签名中恢复签名者地址
+    function recoverSigner(bytes32 ethSignedMessageHash, bytes memory signature) internal pure returns (address) {
+        (bytes32 r, bytes32 s, uint8 v) = splitSignature(signature);
+        return ecrecover(ethSignedMessageHash, v, r, s);
+    }
+    
+    // 拆分签名
+    function splitSignature(bytes memory sig) internal pure returns (bytes32 r, bytes32 s, uint8 v) {
+        require(sig.length == 65, "Invalid signature length");
+        
+        assembly {
+            r := mload(add(sig, 32))
+            s := mload(add(sig, 64))
+            v := byte(0, mload(add(sig, 96)))
+        }
+        
+        return (r, s, v);
+    }
+    
+    // 其他辅助函数...
+}
+```
+
+#### 随机属性生成
+
+为NFT生成随机属性，增加收藏价值。
+
+```solidity
+// 带随机属性的NFT
+contract RandomAttributeNFT is ERC721, Ownable {
+    // 属性定义
+    struct NFTAttributes {
+        uint8 strength;
+        uint8 agility;
+        uint8 intelligence;
+        uint8 luck;
+        string rarity;
+    }
+    
+    // NFT属性映射
+    mapping(uint256 => NFTAttributes) public tokenAttributes;
+    
+    // 随机种子
+    uint256 private randomSeed;
+    
+    constructor(string memory name, string memory symbol) ERC721(name, symbol) {
+        // 初始化随机种子
+        randomSeed = uint256(keccak256(abi.encodePacked(
+            block.timestamp,
+            block.difficulty,
+            msg.sender
+        )));
+    }
+    
+    // 铸造带随机属性的NFT
+    function mintRandomNFT(address to) external onlyOwner returns (uint256) {
+        _tokenIdCounter.increment();
+        uint256 newTokenId = _tokenIdCounter.current();
+        
+        // 生成随机属性
+        NFTAttributes memory attributes = generateRandomAttributes(newTokenId);
+        tokenAttributes[newTokenId] = attributes;
+        
+        // 铸造NFT
+        _safeMint(to, newTokenId);
+        
+        return newTokenId;
+    }
+    
+    // 生成随机属性
+    function generateRandomAttributes(uint256 tokenId) internal returns (NFTAttributes memory) {
+        // 更新随机种子
+        randomSeed = uint256(keccak256(abi.encodePacked(
+            randomSeed,
+            tokenId,
+            block.timestamp,
+            block.difficulty
+        )));
+        
+        // 生成各项属性（0-100）
+        uint8 strength = uint8((randomSeed % 101));
+        uint8 agility = uint8((uint256(keccak256(abi.encodePacked(randomSeed, "agility"))) % 101));
+        uint8 intelligence = uint8((uint256(keccak256(abi.encodePacked(randomSeed, "intelligence"))) % 101));
+        uint8 luck = uint8((uint256(keccak256(abi.encodePacked(randomSeed, "luck"))) % 101));
+        
+        // 计算总评分
+        uint32 totalScore = uint32(strength) + uint32(agility) + uint32(intelligence) + uint32(luck);
+        
+        // 确定稀有度
+        string memory rarity;
+        if (totalScore >= 350) {
+            rarity = "Legendary";
+        } else if (totalScore >= 300) {
+            rarity = "Epic";
+        } else if (totalScore >= 250) {
+            rarity = "Rare";
+        } else if (totalScore >= 200) {
+            rarity = "Uncommon";
+        } else {
+            rarity = "Common";
+        }
+        
+        return NFTAttributes(strength, agility, intelligence, luck, rarity);
+    }
+    
+    // 获取NFT属性
+    function getNFTAttributes(uint256 tokenId) external view returns (NFTAttributes memory) {
+        return tokenAttributes[tokenId];
+    }
+}
+```
+
+## 2. 元数据存储方案
+
+### 2.1 IPFS集成
+
+IPFS（星际文件系统）提供去中心化存储解决方案，适合NFT元数据存储。
+
+#### JavaScript IPFS客户端集成
+
+```javascript
+// 使用IPFS客户端上传元数据
+const IPFS = require('ipfs-http-client');
+const fs = require('fs');
+
+// 连接到IPFS节点
+const ipfs = IPFS.create({
+  host: 'ipfs.infura.io',
+  port: 5001,
+  protocol: 'https'
+});
+
+// 上传NFT图片
+async function uploadImageToIPFS(imagePath) {
+  try {
+    const file = fs.readFileSync(imagePath);
+    const added = await ipfs.add({
+      path: imagePath.split('/').pop(),
+      content: file
+    });
+    
+    const imageCID = added.cid.toString();
+    const imageURI = `https://ipfs.io/ipfs/${imageCID}`;
+    
+    console.log('图片已上传到IPFS:', imageURI);
+    return imageCID;
+  } catch (error) {
+    console.error('上传图片失败:', error);
+    throw error;
+  }
+}
+
+// 创建并上传NFT元数据
+async function uploadNFTMetadata(imageCID, name, description, attributes = []) {
+  try {
+    const metadata = {
+      name: name,
+      description: description,
+      image: `ipfs://${imageCID}`,
+      attributes: attributes,
+      external_url: 'https://your-nft-project.com'
+    };
+    
+    const added = await ipfs.add({
+      path: `${name.toLowerCase().replace(/\s+/g, '-')}-metadata.json`,
+      content: JSON.stringify(metadata, null, 2)
+    });
+    
+    const metadataCID = added.cid.toString();
+    const metadataURI = `ipfs://${metadataCID}`;
+    
+    console.log('元数据已上传到IPFS:', metadataURI);
+    return metadataURI;
+  } catch (error) {
+    console.error('上传元数据失败:', error);
+    throw error;
+  }
+}
+
+// 批量处理NFT资产
+async function processNFTAssets(assets) {
+  const results = [];
+  
+  for (const asset of assets) {
+    try {
+      // 上传图片
+      const imageCID = await uploadImageToIPFS(asset.imagePath);
+      
+      // 上传元数据
+      const metadataURI = await uploadNFTMetadata(
+        imageCID,
+        asset.name,
+        asset.description,
+        asset.attributes
+      );
+      
+      results.push({
+        name: asset.name,
+        metadataURI: metadataURI,
+        status: 'success'
+      });
+    } catch (error) {
+      results.push({
+        name: asset.name,
+        error: error.message,
+        status: 'failed'
+      });
+    }
+  }
+  
+  return results;
+}
+
+// 使用示例
+const nftAssets = [
+  {
+    name: 'CryptoPunk #1',
+    imagePath: './assets/punk1.png',
+    description: 'A rare CryptoPunk with special features',
+    attributes: [
+      { trait_type: 'Background', value: 'Blue' },
+      { trait_type: 'Eyes', value: 'Cool Shades' },
+      { trait_type: 'Hair', value: 'Mohawk' }
+    ]
+  },
+  // 更多NFT资产...
+];
+
+processNFTAssets(nftAssets).then(results => {
+  console.log('NFT处理结果:', results);
+});
+```
+
+#### 使用Pinata进行IPFS固定
+
+Pinata提供了用户友好的IPFS固定服务，确保NFT数据长期可用。
+
+```javascript
+// 使用Pinata API上传和固定NFT数据
+const axios = require('axios');
+const FormData = require('form-data');
+const fs = require('fs');
+
+const PINATA_API_KEY = 'your_pinata_api_key';
+const PINATA_SECRET_API_KEY = 'your_pinata_secret_api_key';
+
+// 上传文件到Pinata
+async function uploadToPinata(filePath, options = {}) {
+  const url = 'https://api.pinata.cloud/pinning/pinFileToIPFS';
+  
+  const formData = new FormData();
+  const file = fs.createReadStream(filePath);
+  formData.append('file', file);
+  
+  // 添加可选元数据
+  if (options.pinataMetadata) {
+    formData.append('pinataMetadata', JSON.stringify(options.pinataMetadata));
+  }
+  
+  try {
+    const response = await axios.post(url, formData, {
+      maxBodyLength: 'Infinity',
+      headers: {
+        'Content-Type': `multipart/form-data; boundary=${formData._boundary}`,
+        'pinata_api_key': PINATA_API_KEY,
+        'pinata_secret_api_key': PINATA_SECRET_API_KEY
+      }
+    });
+    
+    return response.data;
+  } catch (error) {
+    console.error('Pinata上传失败:', error.response?.data || error.message);
+    throw error;
+  }
+}
+
+// 直接上传JSON元数据
+async function uploadJSONToPinata(jsonData, metadata = {}) {
+  const url = 'https://api.pinata.cloud/pinning/pinJSONToIPFS';
+  
+  try {
+    const response = await axios.post(url, {
+      pinataContent: jsonData,
+      pinataMetadata: metadata
+    }, {
+      headers: {
+        'Content-Type': 'application/json',
+        'pinata_api_key': PINATA_API_KEY,
+        'pinata_secret_api_key': PINATA_SECRET_API_KEY
+      }
+    });
+    
+    return response.data;
+  } catch (error) {
+    console.error('Pinata JSON上传失败:', error.response?.data || error.message);
+    throw error;
+  }
+}
+
+// 完整的NFT资产处理流程
+async function processNFTWithPinata(asset) {
+  try {
+    // 1. 上传图片
+    const imageResult = await uploadToPinata(asset.imagePath, {
+      pinataMetadata: {
+        name: `${asset.name}_image.png`,
+        keyvalues: {
+          assetType: 'image',
+          nftName: asset.name
+        }
+      }
+    });
+    
+    // 2. 创建元数据
+    const metadata = {
+      name: asset.name,
+      description: asset.description,
+      image: `ipfs://${imageResult.IpfsHash}`,
+      attributes: asset.attributes,
+      external_url: asset.externalUrl || 'https://your-nft-project.com'
+    };
+    
+    // 3. 上传元数据
+    const metadataResult = await uploadJSONToPinata(metadata, {
+      name: `${asset.name}_metadata.json`,
+      keyvalues: {
+        assetType: 'metadata',
+        nftName: asset.name,
+        imageIpfsHash: imageResult.IpfsHash
+      }
+    });
+    
+    return {
+      name: asset.name,
+      imageIpfsHash: imageResult.IpfsHash,
+      metadataIpfsHash: metadataResult.IpfsHash,
+      metadataUri: `ipfs://${metadataResult.IpfsHash}`,
+      status: 'success'
+    };
+  } catch (error) {
+    return {
+      name: asset.name,
+      error: error.message,
+      status: 'failed'
+    };
+  }
+}
+```
+
+### 2.2 Arweave永久存储
+
+Arweave提供永久存储解决方案，一次性付费永久保存数据。
+
+#### 使用Arweave JS SDK
+
+```javascript
+// 使用Arweave JS SDK上传NFT数据
+const Arweave = require('arweave');
+const fs = require('fs');
+
+// 初始化Arweave客户端
+const arweave = Arweave.init({
+  host: 'arweave.net',
+  port: 443,
+  protocol: 'https',
+  timeout: 20000,
+  logging: false
+});
+
+// 从文件加载钱包
+async function loadWallet(walletPath) {
+  const walletData = fs.readFileSync(walletPath);
+  return JSON.parse(walletData.toString());
+}
+
+// 上传图片到Arweave
+async function uploadImageToArweave(wallet, imagePath, tags = []) {
+  try {
+    // 创建交易
+    const transaction = await arweave.createTransaction({
+      data: fs.readFileSync(imagePath)
+    }, wallet);
+    
+    // 设置内容类型
+    transaction.addTag('Content-Type', 'image/png'); // 根据实际图片类型调整
+    
+    // 添加自定义标签
+    transaction.addTag('App-Name', 'NFT-Asset');
+    transaction.addTag('Asset-Type', 'Image');
+    
+    // 添加用户自定义标签
+    for (const tag of tags) {
+      transaction.addTag(tag.name, tag.value);
+    }
+    
+    // 签名交易
+    await arweave.transactions.sign(transaction, wallet);
+    
+    // 提交交易
+    const response = await arweave.transactions.post(transaction);
+    
+    if (response.status === 200 || response.status === 208) {
+      const imageUri = `ar://${transaction.id}`;
+      console.log('图片已上传到Arweave:', imageUri);
+      return {
+        id: transaction.id,
+        uri: imageUri
+      };
+    } else {
+      throw new Error(`上传失败，状态码: ${response.status}`);
+    }
+  } catch (error) {
+    console.error('Arweave图片上传失败:', error);
+    throw error;
+  }
+}
+
+// 上传JSON元数据到Arweave
+async function uploadMetadataToArweave(wallet, metadata, tags = []) {
+  try {
+    // 创建交易
+    const transaction = await arweave.createTransaction({
+      data: JSON.stringify(metadata, null, 2)
+    }, wallet);
+    
+    // 设置内容类型
+    transaction.addTag('Content-Type', 'application/json');
+    
+    // 添加自定义标签
+    transaction.addTag('App-Name', 'NFT-Metadata');
+    transaction.addTag('Metadata-Type', 'NFT');
+    
+    // 添加用户自定义标签
+    for (const tag of tags) {
+      transaction.addTag(tag.name, tag.value);
+    }
+    
+    // 签名交易
+    await arweave.transactions.sign(transaction, wallet);
+    
+    // 提交交易
+    const response = await arweave.transactions.post(transaction);
+    
+    if (response.status === 200 || response.status === 208) {
+      const metadataUri = `ar://${transaction.id}`;
+      console.log('元数据已上传到Arweave:', metadataUri);
+      return {
+        id: transaction.id,
+        uri: metadataUri
+      };
+    } else {
+      throw new Error(`上传失败，状态码: ${response.status}`);
+    }
+  } catch (error) {
+    console.error('Arweave元数据上传失败:', error);
+    throw error;
+  }
+}
+
+// 完整的Arweave NFT处理流程
+async function processNFTWithArweave(walletPath, asset) {
+  try {
+    // 加载钱包
+    const wallet = await loadWallet(walletPath);
+    
+    // 1. 检查账户余额
+    const walletAddress = await arweave.wallets.jwkToAddress(wallet);
+    const balance = await arweave.wallets.getBalance(walletAddress);
+    const balanceInAr = arweave.ar.winstonToAr(balance);
+    console.log(`钱包地址: ${walletAddress}, 余额: ${balanceInAr} AR`);
+    
+    // 2. 上传图片
+    const imageResult = await uploadImageToArweave(wallet, asset.imagePath, [
+      { name: 'NFT-Name', value: asset.name },
+      { name: 'Description', value: asset.description.substring(0, 100) } // 限制标签长度
+    ]);
+    
+    // 3. 创建NFT元数据
+    const metadata = {
+      name: asset.name,
+      description: asset.description,
+      image: imageResult.uri,
+      attributes: asset.attributes,
+      external_url: asset.externalUrl || 'https://your-nft-project.com',
+      animation_url: asset.animationUrl || null
+    };
+    
+    // 4. 上传元数据
+    const metadataResult = await uploadMetadataToArweave(wallet, metadata, [
+      { name: 'NFT-Name', value: asset.name },
+      { name: 'Image-ID', value: imageResult.id }
+    ]);
+    
+    return {
+      name: asset.name,
+      imageId: imageResult.id,
+      metadataId: metadataResult.id,
+      metadataUri: metadataResult.uri,
+      status: 'success'
+    };
+  } catch (error) {
+    return {
+      name: asset.name,
+      error: error.message,
+      status: 'failed'
+    };
+  }
+}
+```
+
+### 2.3 混合存储策略
+
+结合多种存储方案，平衡成本与可靠性。
+
+```javascript
+// NFT元数据混合存储策略
+class NFTStorageManager {
+  constructor(config) {
+    this.ipfsClient = config.ipfsClient;
+    this.pinataConfig = config.pinataConfig;
+    this.arweaveConfig = config.arweaveConfig;
+    this.defaultStorage = config.defaultStorage || 'ipfs'; // 默认存储方案
+  }
+  
+  // 根据NFT稀有度选择存储方案
+  async storeNFT(asset, rarity = 'common') {
+    // 根据稀有度选择存储策略
+    let storageMethod;
+    if (rarity === 'legendary' || rarity === 'epic') {
+      // 稀有NFT使用永久存储
+      storageMethod = 'arweave';
+    } else if (rarity === 'rare' || rarity === 'uncommon') {
+      // 中级稀有度使用IPFS+Pinata
+      storageMethod = 'ipfs-pinata';
+    } else {
+      // 普通NFT使用基础IPFS
+      storageMethod = this.defaultStorage;
+    }
+    
+    console.log(`为${asset.name} (稀有度: ${rarity}) 使用存储方案: ${storageMethod}`);
+    
+    try {
+      let result;
+      
+      switch (storageMethod) {
+        case 'arweave':
+          result = await this._storeWithArweave(asset);
+          break;
+        case 'ipfs-pinata':
+          result = await this._storeWithPinata(asset);
+          break;
+        case 'ipfs':
+        default:
+          result = await this._storeWithIPFS(asset);
+          break;
+      }
+      
+      // 无论使用哪种存储，都创建备份
+      if (storageMethod !== 'ipfs') {
+        console.log(`创建IPFS备份...`);
+        const backupResult = await this._storeWithIPFS(asset);
+        result.backup = backupResult;
+      }
+      
+      return {
+        ...result,
+        storageMethod,
+        rarity
+      };
+    } catch (error) {
+      console.error(`存储失败，尝试降级方案: ${error.message}`);
+      
+      // 降级策略：如果主要存储失败，尝试使用IPFS
+      try {
+        const fallbackResult = await this._storeWithIPFS(asset);
+        return {
+          ...fallbackResult,
+          storageMethod: 'ipfs', // 降级为IPFS
+          rarity,
+          fallback: true,
+          originalError: error.message
+        };
+      } catch (fallbackError) {
+        throw new Error(`主要存储和降级存储都失败: ${fallbackError.message}`);
+      }
+    }
+  }
+  
+  // 使用基础IPFS存储
+  async _storeWithIPFS(asset) {
+    // 实现IPFS存储逻辑（如前所述）
+    const imageCID = await this._uploadImageToIPFS(asset.imagePath);
+    const metadataURI = await this._uploadMetadataToIPFS(imageCID, asset);
+    
+    return {
+      imageCID,
+      metadataURI,
+      imageUrl: `https://ipfs.io/ipfs/${imageCID}`,
+      metadataUrl: `https://ipfs.io/ipfs/${metadataURI.replace('ipfs://', '')}`
+    };
+  }
+  
+  // 使用Pinata存储
+  async _storeWithPinata(asset) {
+    // 实现Pinata存储逻辑（如前所述）
+    // ...
+  }
+  
+  // 使用Arweave存储
+  async _storeWithArweave(asset) {
+    // 实现Arweave存储逻辑（如前所述）
+    // ...
+  }
+  
+  // 其他辅助方法...
+}
+
+// 使用示例
+const storageConfig = {
+  ipfsClient: {/* IPFS配置 */},
+  pinataConfig: {
+    apiKey: 'your_pinata_api_key',
+    secretApiKey: 'your_pinata_secret_api_key'
+  },
+  arweaveConfig: {
+    walletPath: './arweave-wallet.json'
+  },
+  defaultStorage: 'ipfs'
+};
+
+const storageManager = new NFTStorageManager(storageConfig);
+
+// 处理不同稀有度的NFT
+async function processNFTCollection(collection) {
+  const results = [];
+  
+  for (const nft of collection) {
+    try {
+      const result = await storageManager.storeNFT(nft, nft.rarity);
+      results.push(result);
+    } catch (error) {
+      results.push({
+        name: nft.name,
+        error: error.message,
+        status: 'failed'
+      });
+    }
+  }
+  
+  return results;
+}
+```
+
+## 3. NFT市场开发
+
+### 3.1 基础市场合约
+
+实现NFT的买卖和拍卖功能。
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+
+contract NFTMarketplace is ReentrancyGuard, Ownable {
+    // 平台费率（基础单位：基点，1% = 100）
+    uint256 public platformFee = 250; // 2.5%
+    uint256 public constant FEE_DENOMINATOR = 10000;
+    
+    // 平台费用接收地址
+    address public feeRecipient;
+    
+    // 订单类型枚举
+    enum ListingType {
+        FixedPrice, // 固定价格
+        Auction     // 拍卖
+    }
+    
+    // 订单结构
+    struct Listing {
+        address seller;
+        address nftContract;
+        uint256 tokenId;
+        address paymentToken;
+        uint256 price; // 固定价格或起拍价
+        uint256 quantity; // 用于ERC1155
+        ListingType listingType;
+        uint256 startTime;
+        uint256 endTime;
+        address highestBidder;
+        uint256 highestBid;
+        bool isActive;
+        bool isERC1155;
+    }
+    
+    // 订单ID到订单的映射
+    mapping(uint256 => Listing) public listings;
+    
+    // 订单ID计数器
+    uint256 public listingIdCounter;
+    
+    // 事件定义
+    event ListingCreated(uint256 indexed listingId, address indexed seller, address indexed nftContract, uint256 tokenId);
+    event ListingCancelled(uint256 indexed listingId, address indexed seller);
+    event ListingUpdated(uint256 indexed listingId, address indexed seller, uint256 newPrice);
+    event BidPlaced(uint256 indexed listingId, address indexed bidder, uint256 amount);
+    event AuctionEnded(uint256 indexed listingId, address indexed winner, uint256 amount);
+    event ItemSold(uint256 indexed listingId, address indexed seller, address indexed buyer, uint256 amount);
+    event PlatformFeeUpdated(uint256 newFee);
+    event FeeRecipientUpdated(address newRecipient);
+    
+    constructor(address _feeRecipient) {
+        require(_feeRecipient != address(0), "Invalid fee recipient");
+        feeRecipient = _feeRecipient;
+    }
+    
+    // 上架ERC721 NFT（固定价格）
+    function listNFT(
+        address nftContract,
+        uint256 tokenId,
+        address paymentToken,
+        uint256 price,
+        uint256 duration
+    ) external nonReentrant returns (uint256) {
+        require(price > 0, "Price must be greater than 0");
+        require(IERC721(nftContract).ownerOf(tokenId) == msg.sender, "Not the owner");
+        require(IERC721(nftContract).isApprovedForAll(msg.sender, address(this)) || 
+                IERC721(nftContract).getApproved(tokenId) == address(this), "Not approved");
+        
+        listingIdCounter++;
+        uint256 listingId = listingIdCounter;
+        
+        uint256 endTime = duration > 0 ? block.timestamp + duration : type(uint256).max;
+        
+        listings[listingId] = Listing({
+            seller: msg.sender,
+            nftContract: nftContract,
+            tokenId: tokenId,
+            paymentToken: paymentToken,
+            price: price,
+            quantity: 1,
+            listingType: ListingType.FixedPrice,
+            startTime: block.timestamp,
+            endTime: endTime,
+            highestBidder: address(0),
+            highestBid: 0,
+            isActive: true,
+            isERC1155: false
+        });
+        
+        emit ListingCreated(listingId, msg.sender, nftContract, tokenId);
+        return listingId;
+    }
+    
+    // 上架ERC1155 NFT
+    function listERC1155(
+        address nftContract,
+        uint256 tokenId,
+        uint256 quantity,
+        address paymentToken,
+        uint256 price,
+        uint256 duration
+    ) external nonReentrant returns (uint256) {
+        require(price > 0, "Price must be greater than 0");
+        require(quantity > 0, "Quantity must be greater than 0");
+        require(IERC1155(nftContract).balanceOf(msg.sender, tokenId) >= quantity, "Insufficient balance");
+        require(IERC1155(nftContract).isApprovedForAll(msg.sender, address(this)), "Not approved");
+        
+        listingIdCounter++;
+        uint256 listingId = listingIdCounter;
+        
+        uint256 endTime = duration > 0 ? block.timestamp + duration : type(uint256).max;
+        
+        listings[listingId] = Listing({
+            seller: msg.sender,
+            nftContract: nftContract,
+            tokenId: tokenId,
+            paymentToken: paymentToken,
+            price: price,
+            quantity: quantity,
+            listingType: ListingType.FixedPrice,
+            startTime: block.timestamp,
+            endTime: endTime,
+            highestBidder: address(0),
+            highestBid: 0,
+            isActive: true,
+            isERC1155: true
+        });
+        
+        emit ListingCreated(listingId, msg.sender, nftContract, tokenId);
+        return listingId;
+    }
+    
+    // 创建拍卖
+    function createAuction(
+        address nftContract,
+        uint256 tokenId,
+        address paymentToken,
+        uint256 startingPrice,
+        uint256 duration
+    ) external nonReentrant returns (uint256) {
+        require(startingPrice > 0, "Starting price must be greater than 0");
+        require(duration > 0, "Duration must be greater than 0");
+        require(IERC721(nftContract).ownerOf(tokenId) == msg.sender, "Not the owner");
+        require(IERC721(nftContract).isApprovedForAll(msg.sender, address(this)) || 
+                IERC721(nftContract).getApproved(tokenId) == address(this), "Not approved");
+        
+        listingIdCounter++;
+        uint256 listingId = listingIdCounter;
+        
+        listings[listingId] = Listing({
+            seller: msg.sender,
+            nftContract: nftContract,
+            tokenId: tokenId,
+            paymentToken: paymentToken,
+            price: startingPrice, // 起拍价
+            quantity: 1,
+            listingType: ListingType.Auction,
+            startTime: block.timestamp,
+            endTime: block.timestamp + duration,
+            highestBidder: address(0),
+            highestBid: 0,
+            isActive: true,
+            isERC1155: false
+        });
+        
+        emit ListingCreated(listingId, msg.sender, nftContract, tokenId);
+        return listingId;
+    }
+    
+    // 竞价
+    function placeBid(uint256 listingId) external payable nonReentrant {
+        Listing storage listing = listings[listingId];
+        
+        require(listing.isActive, "Listing not active");
+        require(listing.listingType == ListingType.Auction, "Not an auction");
+        require(block.timestamp < listing.endTime, "Auction ended");
+        require(msg.sender != listing.seller, "Seller cannot bid");
+        
+        uint256 bidAmount;
+        if (listing.paymentToken == address(0)) {
+            // ETH支付
+            bidAmount = msg.value;
+        } else {
+            // ERC20支付
+            require(msg.value == 0, "ETH not accepted for this auction");
+            // 这里需要前端预先授权并调用另一个函数来处理ERC20竞价
+            revert("Please use ERC20 bid function");
+        }
+        
+        require(bidAmount > listing.price, "Bid must exceed starting price");
+        require(bidAmount > listing.highestBid, "Bid must exceed highest bid");
+        
+        // 退还之前最高出价者的资金
+        if (listing.highestBidder != address(0)) {
+            payable(listing.highestBidder).transfer(listing.highestBid);
+        }
+        
+        // 更新最高出价
+        listing.highestBidder = msg.sender;
+        listing.highestBid = bidAmount;
+        
+        emit BidPlaced(listingId, msg.sender, bidAmount);
+    }
+    
+    // 购买固定价格的NFT
+    function buyNFT(uint256 listingId) external payable nonReentrant {
+        Listing storage listing = listings[listingId];
+        
+        require(listing.isActive, "Listing not active");
+        require(listing.listingType == ListingType.FixedPrice, "Not a fixed price listing");
+        require(block.timestamp < listing.endTime, "Listing expired");
+        require(msg.sender != listing.seller, "Seller cannot buy");
+        
+        uint256 paymentAmount;
+        if (listing.paymentToken == address(0)) {
+            // ETH支付
+            paymentAmount = msg.value;
+            require(paymentAmount >= listing.price, "Insufficient payment");
+        } else {
+            // ERC20支付
+            require(msg.value == 0, "ETH not accepted for this listing");
+            // 这里需要前端预先授权并调用另一个函数来处理ERC20购买
+            revert("Please use ERC20 buy function");
+        }
+        
+        // 计算平台费用和卖家收益
+        uint256 platformFeeAmount = (listing.price * platformFee) / FEE_DENOMINATOR;
+        uint256 sellerAmount = listing.price - platformFeeAmount;
+        
+        // 标记订单为非活动
+        listing.isActive = false;
+        
+        // 转移NFT所有权
+        if (listing.isERC1155) {
+            IERC1155(listing.nftContract).safeTransferFrom(
+                listing.seller,
+                msg.sender,
+                listing.tokenId,
+                listing.quantity,
+                ""
+            );
+        } else {
+            IERC721(listing.nftContract).safeTransferFrom(
+                listing.seller,
+                msg.sender,
+                listing.tokenId
+            );
+        }
+        
+        // 支付卖家
+        payable(listing.seller).transfer(sellerAmount);
+        
+        // 支付平台费用
+        payable(feeRecipient).transfer(platformFeeAmount);
+        
+        // 退还超额支付
+        if (paymentAmount > listing.price) {
+            payable(msg.sender).transfer(paymentAmount - listing.price);
+        }
+        
+        emit ItemSold(listingId, listing.seller, msg.sender, listing.price);
+    }
+    
+    // 取消订单
+    function cancelListing(uint256 listingId) external nonReentrant {
+        Listing storage listing = listings[listingId];
+        
+        require(listing.isActive, "Listing not active");
+        require(msg.sender == listing.seller, "Only seller can cancel");
+        
+        // 标记订单为非活动
+        listing.isActive = false;
+        
+        // 如果是拍卖，退还最高出价者的资金
+        if (listing.listingType == ListingType.Auction && listing.highestBidder != address(0)) {
+            payable(listing.highestBidder).transfer(listing.highestBid);
+        }
+        
+        emit ListingCancelled(listingId, msg.sender);
+    }
+    
+    // 结束拍卖
+    function endAuction(uint256 listingId) external nonReentrant {
+        Listing storage listing = listings[listingId];
+        
+        require(listing.isActive, "Listing not active");
+        require(listing.listingType == ListingType.Auction, "Not an auction");
+        require(block.timestamp >= listing.endTime, "Auction not ended yet");
+        require(msg.sender == listing.seller || msg.sender == owner(), "Unauthorized");
+        
+        // 标记订单为非活动
+        listing.isActive = false;
+        
+        // 如果有有效出价，完成交易
+        if (listing.highestBidder != address(0)) {
+            // 计算平台费用和卖家收益
+            uint256 platformFeeAmount = (listing.highestBid * platformFee) / FEE_DENOMINATOR;
+            uint256 sellerAmount = listing.highestBid - platformFeeAmount;
+            
+            // 转移NFT所有权
+            IERC721(listing.nftContract).safeTransferFrom(
+                listing.seller,
+                listing.highestBidder,
+                listing.tokenId
+            );
+            
+            // 支付卖家
+            payable(listing.seller).transfer(sellerAmount);
+            
+            // 支付平台费用
+            payable(feeRecipient).transfer(platformFeeAmount);
+            
+            emit AuctionEnded(listingId, listing.highestBidder, listing.highestBid);
+            emit ItemSold(listingId, listing.seller, listing.highestBidder, listing.highestBid);
+        } else {
+            // 没有出价，拍卖流标
+            emit AuctionEnded(listingId, address(0), 0);
+        }
+    }
+    
+    // 更新平台费率
+    function setPlatformFee(uint256 _platformFee) external onlyOwner {
+        require(_platformFee <= 1000, "Fee too high (max 10%)");
+        platformFee = _platformFee;
+        emit PlatformFeeUpdated(_platformFee);
+    }
+    
+    // 更新费用接收地址
+    function setFeeRecipient(address _feeRecipient) external onlyOwner {
+        require(_feeRecipient != address(0), "Invalid fee recipient");
+        feeRecipient = _feeRecipient;
+        emit FeeRecipientUpdated(_feeRecipient);
+    }
+}
+```
+
+### 3.2 前端市场界面
+
+构建用户友好的NFT市场前端界面。
+
+```javascript
+// React NFT市场前端组件
+import React, { useState, useEffect } from 'react';
+import { ethers } from 'ethers';
+import NFTMarketplaceABI from './NFTMarketplaceABI.json';
+import NFTABI from './NFTABI.json';
+
+const NFTMarketplace = () => {
+  const [provider, setProvider] = useState(null);
+  const [signer, setSigner] = useState(null);
+  const [walletAddress, setWalletAddress] = useState(null);
+  const [marketplaceContract, setMarketplaceContract] = useState(null);
+  const [listings, setListings] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState('all'); // all, myListings, myPurchases
+  
+  const MARKETPLACE_ADDRESS = '0xYourMarketplaceContractAddress';
+  
+  // 连接钱包
+  const connectWallet = async () => {
+    try {
+      if (window.ethereum) {
+        const _provider = new ethers.providers.Web3Provider(window.ethereum);
+        const _signer = _provider.getSigner();
+        const _address = await _signer.getAddress();
+        
+        setProvider(_provider);
+        setSigner(_signer);
+        setWalletAddress(_address);
+        
+        // 初始化市场合约
+        const contract = new ethers.Contract(
+          MARKETPLACE_ADDRESS,
+          NFTMarketplaceABI,
+          _signer
+        );
+        setMarketplaceContract(contract);
+        
+        console.log('钱包已连接:', _address);
+      } else {
+        alert('请安装MetaMask或其他以太坊钱包');
+      }
+    } catch (error) {
+      console.error('连接钱包失败:', error);
+      alert('连接钱包失败，请重试');
+    }
+  };
+  
+  // 获取所有NFT列表
+  const fetchListings = async () => {
+    if (!marketplaceContract) return;
+    
+    setLoading(true);
+    try {
+      // 这里应该调用合约的事件或视图函数来获取列表
+      // 由于合约可能没有提供获取所有列表的视图函数，我们需要监听事件
+      
+      // 获取最新的listingId
+      const listingIdCounter = await marketplaceContract.listingIdCounter();
+      
+      const fetchedListings = [];
+      for (let i = 1; i <= listingIdCounter; i++) {
+        try {
+          const listing = await marketplaceContract.listings(i);
+          
+          if (listing.isActive) {
+            // 获取NFT元数据
+            const nftContract = new ethers.Contract(
+              listing.nftContract,
+              NFTABI,
+              provider
+            );
+            
+            const tokenURI = await nftContract.tokenURI(listing.tokenId);
+            let metadata;
+            
+            // 尝试从IPFS或其他存储加载元数据
+            try {
+              const response = await fetch(tokenURI.replace('ipfs://', 'https://ipfs.io/ipfs/'));
+              metadata = await response.json();
+            } catch (metaError) {
+              console.error('获取元数据失败:', metaError);
+              metadata = { name: 'Unknown NFT', image: 'https://via.placeholder.com/150' };
+            }
+            
+            fetchedListings.push({
+              id: i,
+              seller: listing.seller,
+              nftContract: listing.nftContract,
+              tokenId: listing.tokenId,
+              paymentToken: listing.paymentToken,
+              price: ethers.utils.formatEther(listing.price),
+              listingType: listing.listingType === 0 ? 'FixedPrice' : 'Auction',
+              startTime: listing.startTime.toNumber(),
+              endTime: listing.endTime.toNumber(),
+              highestBid: ethers.utils.formatEther(listing.highestBid),
+              highestBidder: listing.highestBidder,
+              isActive: listing.isActive,
+              metadata
+            });
+          }
+        } catch (error) {
+          console.error(`获取列表 ${i} 失败:`, error);
+        }
+      }
+      
+      // 根据活动标签过滤列表
+      let filteredListings = fetchedListings;
+      if (activeTab === 'myListings') {
+        filteredListings = fetchedListings.filter(l => l.seller.toLowerCase() === walletAddress?.toLowerCase());
+      } else if (activeTab === 'myPurchases') {
+        // 这里需要额外的逻辑来跟踪用户购买的NFT
+        // 可以通过事件监听或后端数据库
+      }
+      
+      setListings(filteredListings);
+    } catch (error) {
+      console.error('获取NFT列表失败:', error);
+      alert('获取NFT列表失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // 购买NFT
+  const buyNFT = async (listingId, price) => {
+    if (!marketplaceContract) return;
+    
+    try {
+      setLoading(true);
+      
+      const tx = await marketplaceContract.buyNFT(listingId, {
+        value: ethers.utils.parseEther(price)
+      });
+      
+      await tx.wait();
+      alert('购买成功！');
+      fetchListings(); // 刷新列表
+    } catch (error) {
+      console.error('购买NFT失败:', error);
+      alert('购买失败，请检查钱包余额和网络');
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // 上架NFT
+  const listNFT = async (nftContract, tokenId, price) => {
+    if (!marketplaceContract) return;
+    
+    try {
+      setLoading(true);
+      
+      // 确保NFT已授权给市场合约
+      const nft = new ethers.Contract(nftContract, NFTABI, signer);
+      const isApproved = await nft.isApprovedForAll(walletAddress, MARKETPLACE_ADDRESS);
+      
+      if (!isApproved) {
+        const approveTx = await nft.setApprovalForAll(MARKETPLACE_ADDRESS, true);
+        await approveTx.wait();
+        console.log('已授权NFT给市场合约');
+      }
+      
+      // 上架NFT
+      const tx = await marketplaceContract.listNFT(
+        nftContract,
+        tokenId,
+        ethers.constants.AddressZero, // ETH支付
+        ethers.utils.parseEther(price),
+        86400 * 7 // 7天
+      );
+      
+      await tx.wait();
+      alert('上架成功！');
+      fetchListings(); // 刷新列表
+    } catch (error) {
+      console.error('上架NFT失败:', error);
+      alert('上架失败，请重试');
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // 竞价NFT
+  const placeBid = async (listingId, bidAmount) => {
+    if (!marketplaceContract) return;
+    
+    try {
+      setLoading(true);
+      
+      const tx = await marketplaceContract.placeBid(listingId, {
+        value: ethers.utils.parseEther(bidAmount)
+      });
+      
+      await tx.wait();
+      alert('竞价成功！');
+      fetchListings(); // 刷新列表
+    } catch (error) {
+      console.error('竞价NFT失败:', error);
+      alert('竞价失败，请检查出价是否高于当前最高出价');
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // 初始化
+  useEffect(() => {
+    if (walletAddress && marketplaceContract) {
+      fetchListings();
+    }
+  }, [walletAddress, marketplaceContract, activeTab]);
+  
+  // 监听账户变化
+  useEffect(() => {
+    if (window.ethereum) {
+      const handleAccountsChanged = (accounts) => {
+        if (accounts.length > 0) {
+          setWalletAddress(accounts[0]);
+          // 重新初始化provider和signer
+          const _provider = new ethers.providers.Web3Provider(window.ethereum);
+          const _signer = _provider.getSigner();
+          setProvider(_provider);
+          setSigner(_signer);
+          
+          const contract = new ethers.Contract(
+            MARKETPLACE_ADDRESS,
+            NFTMarketplaceABI,
+            _signer
+          );
+          setMarketplaceContract(contract);
+        } else {
+          setWalletAddress(null);
+          setProvider(null);
+          setSigner(null);
+          setMarketplaceContract(null);
+        }
+      };
+      
+      window.ethereum.on('accountsChanged', handleAccountsChanged);
+      
+      return () => {
+        window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
+      };
+    }
+  }, []);
+  
+  return (
+    <div className="nft-marketplace">
+      <header className="marketplace-header">
+        <h1>NFT Marketplace</h1>
+        {walletAddress ? (
+          <div className="wallet-info">
+            <span>已连接: {walletAddress.substring(0, 6)}...{walletAddress.substring(38)}</span>
+          </div>
+        ) : (
+          <button onClick={connectWallet} className="connect-wallet-btn">
+            连接钱包
+          </button>
+        )}
+      </header>
+      
+      <div className="marketplace-tabs">
+        <button 
+          className={`tab-btn ${activeTab === 'all' ? 'active' : ''}`}
+          onClick={() => setActiveTab('all')}
+        >
+          全部NFT
+        </button>
+        <button 
+          className={`tab-btn ${activeTab === 'myListings' ? 'active' : ''}`}
+          onClick={() => setActiveTab('myListings')}
+        >
+          我的上架
+        </button>
+        <button 
+          className={`tab-btn ${activeTab === 'myPurchases' ? 'active' : ''}`}
+          onClick={() => setActiveTab('myPurchases')}
+        >
+          我的收藏
+        </button>
+      </div>
+      
+      {walletAddress && (
+        <div className="list-nft-section">
+          <h2>上架NFT</h2>
+          <div className="list-nft-form">
+            {/* NFT上架表单 */}
+            <button onClick={() => {/* 打开上架模态框 */}}>上架新NFT</button>
+          </div>
+        </div>
+      )}
+      
+      <div className="nft-listings">
+        {loading ? (
+          <div className="loading">加载中...</div>
+        ) : listings.length > 0 ? (
+          <div className="nft-grid">
+            {listings.map(listing => (
+              <div key={listing.id} className="nft-card">
+                <div className="nft-image">
+                  <img 
+                    src={listing.metadata.image?.replace('ipfs://', 'https://ipfs.io/ipfs/') || 'https://via.placeholder.com/300'}
+                    alt={listing.metadata.name || 'NFT'}
+                  />
+                </div>
+                <div className="nft-info">
+                  <h3>{listing.metadata.name || `NFT #${listing.tokenId}`}</h3>
+                  <p>{listing.metadata.description?.substring(0, 100)}...</p>
+                  <div className="nft-price">
+                    {listing.listingType === 'FixedPrice' ? (
+                      <span>价格: {listing.price} ETH</span>
+                    ) : (
+                      <>
+                        <span>当前最高出价: {listing.highestBid} ETH</span>
+                        <span>起拍价: {listing.price} ETH</span>
+                      </>
+                    )}
+                  </div>
+                  {walletAddress && listing.seller.toLowerCase() !== walletAddress.toLowerCase() && (
+                    <div className="nft-actions">
+                      {listing.listingType === 'FixedPrice' ? (
+                        <button 
+                          onClick={() => buyNFT(listing.id, listing.price)}
+                          disabled={loading}
+                        >
+                          立即购买
+                        </button>
+                      ) : (
+                        <button 
+                          onClick={() => {/* 打开竞价模态框 */}}
+                          disabled={loading}
+                        >
+                          参与竞价
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {walletAddress && listing.seller.toLowerCase() === walletAddress.toLowerCase() && (
+                    <div className="nft-actions">
+                      <button onClick={() => {/* 取消上架 */}}>取消上架</button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="no-listings">暂无NFT</div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default NFTMarketplace;
+```
+
+### 3.3 高级市场功能
+
+#### 版税支持
+
+实现符合EIP-2981标准的版税功能。
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "@openzeppelin/contracts/token/common/ERC2981.sol";
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
+
+contract RoyaltyNFT is ERC721URIStorage, ERC2981 {
+    using Counters for Counters.Counter;
+    Counters.Counter private _tokenIdCounter;
+    
+    constructor(string memory name, string memory symbol, address royaltyReceiver, uint96 royaltyPercentage) 
+        ERC721(name, symbol)
+    {
+        // 设置默认版税接收者和比例（以10000为基数）
+        // 例如：500 表示 5%
+        _setDefaultRoyalty(royaltyReceiver, royaltyPercentage);
+    }
+    
+    // 铸造NFT
+    function mint(address to, string memory uri) public returns (uint256) {
+        _tokenIdCounter.increment();
+        uint256 tokenId = _tokenIdCounter.current();
+        _safeMint(to, tokenId);
+        _setTokenURI(tokenId, uri);
+        return tokenId;
+    }
+    
+    // 为特定NFT设置版税
+    function setTokenRoyalty(
+        uint256 tokenId,
+        address receiver,
+        uint96 royaltyPercentage
+    ) public onlyOwner {
+        _setTokenRoyalty(tokenId, receiver, royaltyPercentage);
+    }
+    
+    // 覆盖合约支持的接口
+    function supportsInterface(bytes4 interfaceId) 
+        public 
+        view 
+        override(ERC721, ERC2981) 
+        returns (bool) 
+    {
+        return super.supportsInterface(interfaceId);
+    }
+}
+
+// 市场合约中集成版税支付
+contract NFTMarketplaceWithRoyalties is NFTMarketplace {
+    // 购买NFT时计算并支付版税
+    function buyNFT(uint256 listingId) external payable override nonReentrant {
+        // ... 之前的代码 ...
+        
+        // 检查NFT是否支持版税
+        (bool royaltySupported, address royaltyReceiver, uint256 royaltyAmount) = _getRoyaltyInfo(listing.nftContract, listing.tokenId, listing.price);
+        
+        // 重新计算卖家收益和平台费用
+        uint256 platformFeeAmount = (listing.price * platformFee) / FEE_DENOMINATOR;
+        uint256 sellerAmount = listing.price - platformFeeAmount;
+        
+        if (royaltySupported && royaltyAmount > 0) {
+            sellerAmount = sellerAmount - royaltyAmount;
+        }
+        
+        // ... 转移NFT的代码 ...
+        
+        // 支付各方
+        payable(listing.seller).transfer(sellerAmount);
+        payable(feeRecipient).transfer(platformFeeAmount);
+        
+        if (royaltySupported && royaltyAmount > 0) {
+            payable(royaltyReceiver).transfer(royaltyAmount);
+        }
+        
+        // ... 剩余代码 ...
+    }
+    
+    // 获取NFT版税信息
+    function _getRoyaltyInfo(address nftContract, uint256 tokenId, uint256 salePrice) 
+        internal 
+        view 
+        returns (bool supported, address receiver, uint256 amount) 
+    {
+        // 检查合约是否支持ERC2981接口
+        bytes4 interfaceId = bytes4(keccak256("royaltyInfo(uint256,uint256)"));
+        
+        (bool success, bytes memory data) = nftContract.staticcall(abi.encodeWithSelector(interfaceId, tokenId, salePrice));
+        
+        if (success && data.length == 64) {
+            // 解码返回值
+            (address _receiver, uint256 _amount) = abi.decode(data, (address, uint256));
+            return (true, _receiver, _amount);
+        }
+        
+        return (false, address(0), 0);
+    }
+}
+
+```
+
+## 4. 元宇宙组件开发
+
+### 4.1 3D模型集成
+
+在元宇宙环境中展示NFT，需要将2D图像转换为3D资产或将3D模型直接集成到应用中。
+
+#### Three.js集成示例
+
+```javascript
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
+import { NFTMetadataLoader } from './NFTMetadataLoader';
+
+class NFT3DRenderer {
+  constructor(containerId) {
+    this.container = document.getElementById(containerId);
+    this.scene = null;
+    this.camera = null;
+    this.renderer = null;
+    this.controls = null;
+    this.currentNFT = null;
+    this.animationFrameId = null;
+  }
+  
+  // 初始化3D场景
+  init() {
+    // 创建场景
+    this.scene = new THREE.Scene();
+    this.scene.background = new THREE.Color(0x050505);
+    
+    // 添加环境光
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    this.scene.add(ambientLight);
+    
+    // 添加方向光
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+    directionalLight.position.set(5, 10, 7.5);
+    this.scene.add(directionalLight);
+    
+    // 创建相机
+    const width = this.container.clientWidth;
+    const height = this.container.clientHeight;
+    this.camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
+    this.camera.position.z = 5;
+    
+    // 创建渲染器
+    this.renderer = new THREE.WebGLRenderer({ antialias: true });
+    this.renderer.setSize(width, height);
+    this.renderer.setPixelRatio(window.devicePixelRatio);
+    this.container.appendChild(this.renderer.domElement);
+    
+    // 添加轨道控制器
+    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+    this.controls.enableDamping = true;
+    this.controls.dampingFactor = 0.05;
+    
+    // 添加地面网格以增强3D感
+    const gridHelper = new THREE.GridHelper(10, 10, 0x444444, 0x222222);
+    this.scene.add(gridHelper);
+    
+    // 监听窗口大小变化
+    window.addEventListener('resize', this.handleResize.bind(this));
+    
+    // 开始动画循环
+    this.animate();
+  }
+  
+  // 加载NFT 3D模型
+  async loadNFT(nftMetadataUrl) {
+    // 移除当前NFT
+    if (this.currentNFT) {
+      this.scene.remove(this.currentNFT);
+      this.currentNFT = null;
+    }
+    
+    try {
+      // 加载NFT元数据
+      const metadataLoader = new NFTMetadataLoader();
+      const metadata = await metadataLoader.load(nftMetadataUrl);
+      
+      // 检查是否有3D模型URL
+      const modelUrl = metadata.animation_url || metadata.model_url;
+      
+      if (modelUrl) {
+        // 如果有3D模型，加载模型
+        await this.load3DModel(modelUrl);
+      } else if (metadata.image) {
+        // 如果只有2D图像，创建一个平面来显示
+        await this.create2DPlane(metadata.image);
+      }
+      
+      return metadata;
+    } catch (error) {
+      console.error('加载NFT失败:', error);
+      throw error;
+    }
+  }
+  
+  // 加载3D模型
+  load3DModel(modelUrl) {
+    return new Promise((resolve, reject) => {
+      const loader = new GLTFLoader();
+      
+      loader.load(
+        modelUrl,
+        (gltf) => {
+          const model = gltf.scene;
+          
+          // 居中模型
+          this.centerModel(model);
+          
+          // 添加到场景
+          this.scene.add(model);
+          this.currentNFT = model;
+          
+          resolve();
+        },
+        (xhr) => {
+          console.log(`${(xhr.loaded / xhr.total * 100)}% 已加载`);
+        },
+        (error) => {
+          console.error('加载3D模型失败:', error);
+          reject(error);
+        }
+      );
+    });
+  }
+  
+  // 创建2D平面显示NFT图像
+  async create2DPlane(imageUrl) {
+    return new Promise((resolve, reject) => {
+      const textureLoader = new THREE.TextureLoader();
+      
+      textureLoader.load(
+        imageUrl.replace('ipfs://', 'https://ipfs.io/ipfs/'),
+        (texture) => {
+          // 创建平面几何体
+          const geometry = new THREE.PlaneGeometry(2, 2);
+          const material = new THREE.MeshBasicMaterial({ 
+            map: texture, 
+            side: THREE.DoubleSide 
+          });
+          
+          const plane = new THREE.Mesh(geometry, material);
+          
+          // 添加到场景
+          this.scene.add(plane);
+          this.currentNFT = plane;
+          
+          // 稍微旋转平面以增强3D感
+          plane.rotation.x = -Math.PI / 8;
+          
+          resolve();
+        },
+        undefined,
+        (error) => {
+          console.error('加载图像失败:', error);
+          reject(error);
+        }
+      );
+    });
+  }
+  
+  // 居中模型
+  centerModel(model) {
+    const box = new THREE.Box3().setFromObject(model);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    
+    // 计算模型的最大维度
+    const maxDim = Math.max(size.x, size.y, size.z);
+    
+    // 缩放模型以适应视图
+    const scale = 3 / maxDim;
+    model.scale.set(scale, scale, scale);
+    
+    // 移动模型到原点
+    model.position.x = -center.x * scale;
+    model.position.y = -center.y * scale;
+    model.position.z = -center.z * scale;
+  }
+  
+  // 动画循环
+  animate() {
+    this.animationFrameId = requestAnimationFrame(this.animate.bind(this));
+    
+    this.controls.update();
+    this.renderer.render(this.scene, this.camera);
+  }
+  
+  // 处理窗口大小变化
+  handleResize() {
+    const width = this.container.clientWidth;
+    const height = this.container.clientHeight;
+    
+    this.camera.aspect = width / height;
+    this.camera.updateProjectionMatrix();
+    
+    this.renderer.setSize(width, height);
+  }
+  
+  // 清理资源
+  dispose() {
+    if (this.animationFrameId) {
+      cancelAnimationFrame(this.animationFrameId);
+    }
+    
+    window.removeEventListener('resize', this.handleResize);
+    
+    if (this.currentNFT) {
+      this.scene.remove(this.currentNFT);
+    }
+    
+    if (this.renderer && this.container) {
+      this.container.removeChild(this.renderer.domElement);
+      this.renderer.dispose();
+    }
+  }
+}
+
+// 使用示例
+const nftRenderer = new NFT3DRenderer('nft-container');
+nftRenderer.init();
+
+// 加载NFT元数据
+async function displayNFT(nftMetadataUrl) {
+  try {
+    await nftRenderer.loadNFT(nftMetadataUrl);
+    console.log('NFT加载成功');
+  } catch (error) {
+    console.error('NFT加载失败:', error);
+  }
+}
+```
+
+#### 3D场景中的NFT交互区域
+
+```javascript
+// 创建可交互的NFT展示区域
+class NFTInteractiveArea {
+  constructor(renderer, scene, camera) {
+    this.renderer = renderer;
+    this.scene = scene;
+    this.camera = camera;
+    this.raycaster = new THREE.Raycaster();
+    this.mouse = new THREE.Vector2();
+    this.nftItems = new Map();
+    
+    // 添加鼠标事件监听
+    this.renderer.domElement.addEventListener('click', this.onClick.bind(this));
+  }
+  
+  // 添加NFT到场景
+  addNFT(nftId, model, metadata, position) {
+    model.position.copy(position);
+    this.scene.add(model);
+    
+    // 存储NFT信息
+    this.nftItems.set(nftId, {
+      model: model,
+      metadata: metadata,
+      position: position
+    });
+    
+    // 添加选中效果
+    this.addHoverEffect(model, nftId);
+  }
+  
+  // 添加悬停效果
+  addHoverEffect(model, nftId) {
+    // 保存原始材质
+    const originalMaterials = [];
+    model.traverse((child) => {
+      if (child.isMesh) {
+        originalMaterials.push({ child, material: child.material });
+      }
+    });
+    
+    // 创建高亮材质
+    const highlightMaterials = originalMaterials.map(item => ({
+      child: item.child,
+      material: item.child.material.clone()
+    }));
+    
+    highlightMaterials.forEach(item => {
+      if (item.material.isMeshBasicMaterial) {
+        item.material.emissive.set(0x222222);
+      } else if (item.material.isMeshStandardMaterial) {
+        item.material.emissive.set(0x222222);
+      }
+    });
+    
+    // 添加鼠标移入事件
+    model.addEventListener('mouseenter', () => {
+      highlightMaterials.forEach(item => {
+        item.child.material = item.material;
+      });
+    });
+    
+    // 添加鼠标移出事件
+    model.addEventListener('mouseleave', () => {
+      originalMaterials.forEach(item => {
+        item.child.material = item.material;
+      });
+    });
+  }
+  
+  // 处理点击事件
+  onClick(event) {
+    // 计算鼠标在归一化设备坐标中的位置
+    this.mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+    this.mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+    
+    // 更新射线投射器
+    this.raycaster.setFromCamera(this.mouse, this.camera);
+    
+    // 获取所有NFT模型
+    const nftModels = Array.from(this.nftItems.values()).map(item => item.model);
+    
+    // 计算射线与物体的交点
+    const intersects = this.raycaster.intersectObjects(nftModels, true);
+    
+    if (intersects.length > 0) {
+      // 找到第一个交点的NFT
+      const intersectedObject = intersects[0].object;
+      
+      // 向上查找直到找到NFT模型根节点
+      let currentObject = intersectedObject;
+      while (currentObject.parent && currentObject.parent !== this.scene) {
+        currentObject = currentObject.parent;
+      }
+      
+      // 查找对应的NFT信息
+      let clickedNFT = null;
+      for (const [id, item] of this.nftItems.entries()) {
+        if (item.model === currentObject) {
+          clickedNFT = { id, ...item };
+          break;
+        }
+      }
+      
+      if (clickedNFT) {
+        this.onNFTClicked(clickedNFT);
+      }
+    }
+  }
+  
+  // NFT点击事件回调
+  onNFTClicked(nft) {
+    console.log('NFT被点击:', nft.id, nft.metadata.name);
+    
+    // 触发自定义事件
+    const event = new CustomEvent('nft-clicked', { 
+      detail: { 
+        id: nft.id, 
+        metadata: nft.metadata 
+      } 
+    });
+    window.dispatchEvent(event);
+    
+    // 可以在这里添加NFT详情弹窗等交互
+  }
+  
+  // 更新交互区域
+  update() {
+    // 可以在这里添加动画或状态更新逻辑
+  }
+}
+```
+
+### 4.2 VR/AR集成
+
+将NFT与虚拟现实和增强现实技术结合，创造沉浸式体验。
+
+#### WebXR集成
+
+```javascript
+import * as THREE from 'three';
+import { VRButton } from 'three/examples/jsm/webxr/VRButton.js';
+import { XRControllerModelFactory } from 'three/examples/jsm/webxr/XRControllerModelFactory.js';
+
+class NFTVRExperience {
+  constructor(containerId) {
+    this.container = document.getElementById(containerId);
+    this.scene = null;
+    this.camera = null;
+    this.renderer = null;
+    this.controller1 = null;
+    this.controller2 = null;
+    this.nftCollection = [];
+  }
+  
+  // 初始化VR体验
+  init() {
+    // 创建场景
+    this.scene = new THREE.Scene();
+    this.scene.background = new THREE.Color(0x000000);
+    
+    // 添加环境光
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    this.scene.add(ambientLight);
+    
+    // 添加方向光
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    directionalLight.position.set(0, 1, 1).normalize();
+    this.scene.add(directionalLight);
+    
+    // 创建相机
+    this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
+    
+    // 创建渲染器
+    this.renderer = new THREE.WebGLRenderer({ antialias: true });
+    this.renderer.setPixelRatio(window.devicePixelRatio);
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.renderer.xr.enabled = true;
+    
+    this.container.appendChild(this.renderer.domElement);
+    
+    // 添加VR按钮
+    document.body.appendChild(VRButton.createButton(this.renderer));
+    
+    // 初始化控制器
+    this.initControllers();
+    
+    // 添加地面网格
+    const gridHelper = new THREE.GridHelper(10, 10);
+    this.scene.add(gridHelper);
+    
+    // 监听窗口大小变化
+    window.addEventListener('resize', this.onWindowResize.bind(this));
+    
+    // 开始渲染循环
+    this.renderer.setAnimationLoop(this.animate.bind(this));
+  }
+  
+  // 初始化VR控制器
+  initControllers() {
+    const controllerModelFactory = new XRControllerModelFactory();
+    
+    // 控制器1
+    this.controller1 = this.renderer.xr.getController(0);
+    this.scene.add(this.controller1);
+    
+    const controllerGrip1 = this.renderer.xr.getControllerGrip(0);
+    controllerGrip1.add(controllerModelFactory.createControllerModel(controllerGrip1));
+    this.scene.add(controllerGrip1);
+    
+    // 控制器2
+    this.controller2 = this.renderer.xr.getController(1);
+    this.scene.add(this.controller2);
+    
+    const controllerGrip2 = this.renderer.xr.getControllerGrip(1);
+    controllerGrip2.add(controllerModelFactory.createControllerModel(controllerGrip2));
+    this.scene.add(controllerGrip2);
+    
+    // 添加控制器射线
+    const geometry = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(0, 0, -1)
+    ]);
+    
+    const line = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: 0xffffff }));
+    line.name = 'line';
+    line.scale.z = 5;
+    
+    this.controller1.add(line.clone());
+    this.controller2.add(line.clone());
+    
+    // 添加选择事件监听
+    this.controller1.addEventListener('selectstart', this.onSelectStart.bind(this));
+    this.controller1.addEventListener('selectend', this.onSelectEnd.bind(this));
+    this.controller2.addEventListener('selectstart', this.onSelectStart.bind(this));
+    this.controller2.addEventListener('selectend', this.onSelectEnd.bind(this));
+  }
+  
+  // 添加NFT到VR空间
+  addNFTToVR(nftId, model, metadata, position) {
+    // 缩放模型
+    const box = new THREE.Box3().setFromObject(model);
+    const size = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const scale = 0.5 / maxDim; // 适中的尺寸以便在VR中查看
+    model.scale.set(scale, scale, scale);
+    
+    // 设置位置
+    model.position.copy(position);
+    
+    // 添加到场景
+    this.scene.add(model);
+    
+    // 存储NFT信息
+    this.nftCollection.push({
+      id: nftId,
+      model: model,
+      metadata: metadata
+    });
+    
+    // 添加交互组件
+    this.addInteractiveComponent(model, nftId);
+  }
+  
+  // 添加交互组件
+  addInteractiveComponent(model, nftId) {
+    // 创建一个包围盒来检测交互
+    const box = new THREE.Box3().setFromObject(model);
+    const size = box.getSize(new THREE.Vector3());
+    
+    const boxGeometry = new THREE.BoxGeometry(size.x * 1.2, size.y * 1.2, size.z * 1.2);
+    const boxMaterial = new THREE.MeshBasicMaterial({ 
+      transparent: true, 
+      opacity: 0,
+      wireframe: false
+    });
+    
+    const interactionBox = new THREE.Mesh(boxGeometry, boxMaterial);
+    interactionBox.position.copy(model.position);
+    interactionBox.userData = { isInteractive: true, nftId: nftId };
+    
+    this.scene.add(interactionBox);
+  }
+  
+  // 选择开始事件
+  onSelectStart(event) {
+    const controller = event.target;
+    
+    // 高亮控制器射线
+    const line = controller.getObjectByName('line');
+    if (line) {
+      line.material.color.set(0x00ff00);
+    }
+    
+    // 检测是否选中NFT
+    this.checkNFTIntersection(controller);
+  }
+  
+  // 选择结束事件
+  onSelectEnd(event) {
+    const controller = event.target;
+    
+    // 恢复控制器射线颜色
+    const line = controller.getObjectByName('line');
+    if (line) {
+      line.material.color.set(0xffffff);
+    }
+  }
+  
+  // 检查NFT交集
+  checkNFTIntersection(controller) {
+    // 从控制器发射射线
+    const raycaster = new THREE.Raycaster();
+    const tempMatrix = new THREE.Matrix4();
+    
+    tempMatrix.identity().extractRotation(controller.matrixWorld);
+    
+    const ray = new THREE.Ray();
+    ray.origin.setFromMatrixPosition(controller.matrixWorld);
+    ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+    
+    raycaster.ray.copy(ray);
+    
+    // 查找所有交互对象
+    const interactiveObjects = [];
+    this.scene.traverse(obj => {
+      if (obj.userData && obj.userData.isInteractive) {
+        interactiveObjects.push(obj);
+      }
+    });
+    
+    const intersects = raycaster.intersectObjects(interactiveObjects);
+    
+    if (intersects.length > 0) {
+      const intersect = intersects[0];
+      const nftId = intersect.object.userData.nftId;
+      
+      // 查找对应的NFT
+      const nft = this.nftCollection.find(item => item.id === nftId);
+      
+      if (nft) {
+        this.onNFTSelected(nft);
+      }
+    }
+  }
+  
+  // NFT选中事件
+  onNFTSelected(nft) {
+    console.log('在VR中选中NFT:', nft.id, nft.metadata.name);
+    
+    // 显示NFT详情
+    this.showNFTDetails(nft);
+  }
+  
+  // 显示NFT详情
+  showNFTDetails(nft) {
+    // 创建一个详情面板（在VR中显示信息）
+    // 这里可以使用HTML覆盖层或者3D文本
+    const event = new CustomEvent('vr-nft-selected', { 
+      detail: { 
+        id: nft.id, 
+        metadata: nft.metadata 
+      } 
+    });
+    window.dispatchEvent(event);
+  }
+  
+  // 处理窗口大小变化
+  onWindowResize() {
+    this.camera.aspect = window.innerWidth / window.innerHeight;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+  
+  // 动画循环
+  animate(timestamp, frame) {
+    if (frame) {
+      // VR特定逻辑
+      const referenceSpace = this.renderer.xr.getReferenceSpace();
+      const session = this.renderer.xr.getSession();
+      
+      // 可以在这里添加VR交互逻辑
+    }
+    
+    this.renderer.render(this.scene, this.camera);
+  }
+}
+
+// 使用示例
+const vrExperience = new NFTVRExperience('vr-container');
+vrExperience.init();
+```
+
+#### ARKit/ARCore集成
+
+对于移动端AR体验，可以使用React Native和AR库结合Web3。
+
+```javascript
+// React Native AR与NFT集成示例
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { ARKit } from 'react-native-arkit'; // iOS
+// 或使用 react-native-vision-camera 结合 AR 功能
+import { ethers } from 'ethers';
+import { Web3Provider } from '@ethersproject/providers';
+import NFTViewer from './NFTViewer';
+
+const NFTARScreen = ({ route, navigation }) => {
+  const { nftAddress, tokenId } = route.params;
+  const [nftData, setNftData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [isARReady, setIsARReady] = useState(false);
+  const arRef = useRef(null);
+  
+  // NFT合约ABI（简化版）
+  const nftAbi = [
+    "function tokenURI(uint256 tokenId) view returns (string)",
+    "function ownerOf(uint256 tokenId) view returns (address)"
+  ];
+  
+  // 加载NFT数据
+  useEffect(() => {
+    loadNFTData();
+  }, [nftAddress, tokenId]);
+  
+  const loadNFTData = async () => {
+    try {
+      setLoading(true);
+      
+      // 获取Web3提供者
+      const provider = new ethers.providers.InfuraProvider('mainnet', 'YOUR_INFURA_KEY');
+      const nftContract = new ethers.Contract(nftAddress, nftAbi, provider);
+      
+      // 获取NFT元数据URI
+      const tokenUri = await nftContract.tokenURI(tokenId);
+      
+      // 获取NFT所有者
+      const owner = await nftContract.ownerOf(tokenId);
+      
+      // 解析IPFS URI
+      const resolvedUri = tokenUri.replace('ipfs://', 'https://ipfs.io/ipfs/');
+      
+      // 获取元数据
+      const response = await fetch(resolvedUri);
+      const metadata = await response.json();
+      
+      setNftData({
+        ...metadata,
+        owner,
+        tokenId,
+        contractAddress: nftAddress
+      });
+    } catch (err) {
+      console.error('加载NFT数据失败:', err);
+      setError('无法加载NFT数据');
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // 处理AR会话开始
+  const handleARSessionDidStart = () => {
+    console.log('AR会话已开始');
+    setIsARReady(true);
+    
+    if (nftData) {
+      addNFTToARScene();
+    }
+  };
+  
+  // 将NFT添加到AR场景
+  const addNFTToARScene = async () => {
+    if (!arRef.current || !nftData) return;
+    
+    try {
+      // 处理图像URL
+      let imageUrl = nftData.image;
+      if (imageUrl.startsWith('ipfs://')) {
+        imageUrl = imageUrl.replace('ipfs://', 'https://ipfs.io/ipfs/');
+      }
+      
+      // 在ARKit中创建平面
+      const { node } = await arRef.current.addBox({
+        position: { x: 0, y: 0, z: -0.5 },
+        shape: { width: 0.15, height: 0.01, length: 0.15 },
+        eulerAngles: { x: Math.PI / 2, y: 0, z: 0 },
+        materials: {
+          diffuse: { contents: imageUrl }
+        },
+        name: `NFT_${tokenId}`
+      });
+      
+      console.log('NFT已添加到AR场景:', node);
+    } catch (err) {
+      console.error('添加NFT到AR场景失败:', err);
+    }
+  };
+  
+  // 处理AR点击事件
+  const handleARTouch = async (event) => {
+    if (!arRef.current || !event.nativeEvent) return;
+    
+    try {
+      const { x, y } = event.nativeEvent.location;
+      const hitTestResults = await arRef.current.hitTest(x, y, { types: ['existingPlaneUsingExtent'] });
+      
+      if (hitTestResults && hitTestResults.length > 0) {
+        // 在点击位置放置NFT
+        const { worldTransform } = hitTestResults[0];
+        
+        // 移除现有NFT
+        await arRef.current.removeNode(`NFT_${tokenId}`);
+        
+        // 处理图像URL
+        let imageUrl = nftData.image;
+        if (imageUrl.startsWith('ipfs://')) {
+          imageUrl = imageUrl.replace('ipfs://', 'https://ipfs.io/ipfs/');
+        }
+        
+        // 添加新NFT到点击位置
+        await arRef.current.addBox({
+          position: worldTransform.translation,
+          shape: { width: 0.15, height: 0.01, length: 0.15 },
+          eulerAngles: { x: Math.PI / 2, y: 0, z: 0 },
+          materials: {
+            diffuse: { contents: imageUrl }
+          },
+          name: `NFT_${tokenId}`
+        });
+      }
+    } catch (err) {
+      console.error('AR点击处理失败:', err);
+    }
+  };
+  
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.loadingText}>加载NFT数据...</Text>
+      </View>
+    );
+  }
+  
+  if (error || !nftData) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.errorText}>{error || '无法加载NFT'}</Text>
+        <TouchableOpacity style={styles.retryButton} onPress={loadNFTData}>
+          <Text style={styles.retryButtonText}>重试</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+  
+  return (
+    <View style={styles.container}>
+      {/* 渲染AR视图 */}
+      {Platform.OS === 'ios' ? (
+        <ARKit
+          ref={arRef}
+          style={{ flex: 1 }}
+          onARKitDidInitialize={() => console.log('ARKit初始化完成')}
+          onARTouch={handleARTouch}
+          planeDetection={['horizontal']}
+          lightEstimationEnabled={true}
+          sessionOptions={{
+            worldAlignment: ARKit.WORLD_ALIGNMENT.GRAVITY
+          }}
+          onSessionDidStart={handleARSessionDidStart}
+        />
+      ) : (
+        <View style={[styles.container, { backgroundColor: '#333' }]}>
+          <Text style={{ color: 'white' }}>Android AR支持开发中</Text>
+        </View>
+      )}
+      
+      {/* NFT信息覆盖层 */}
+      <View style={styles.overlay}>
+        <Text style={styles.nftName}>{nftData.name}</Text>
+        <Text style={styles.nftDescription} numberOfLines={2}>
+          {nftData.description}
+        </Text>
+        <TouchableOpacity 
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+        >
+          <Text style={styles.backButtonText}>返回</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#000',
+  },
+  loadingText: {
+    color: '#fff',
+    fontSize: 18,
+  },
+  errorText: {
+    color: '#ff3333',
+    fontSize: 18,
+    marginBottom: 20,
+  },
+  retryButton: {
+    backgroundColor: '#4CAF50',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 5,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+  },
+  overlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    padding: 20,
+  },
+  nftName: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 10,
+  },
+  nftDescription: {
+    color: '#ccc',
+    fontSize: 16,
+    marginBottom: 15,
+  },
+  backButton: {
+    backgroundColor: '#2196F3',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 5,
+    alignSelf: 'flex-start',
+  },
+  backButtonText: {
+    color: '#fff',
+    fontSize: 16,
+  },
+});
+
+export default NFTARScreen;
+```
+
+## 5. 安全最佳实践与部署
+
+### 5.1 智能合约安全
+
+NFT和元宇宙项目涉及大量资产，安全至关重要。
+
+#### 安全审计
+
+```javascript
+// 使用Slither进行自动化安全分析
+// 安装: pip install slither-analyzer
+
+// 在项目根目录运行
+// slither . --json results.json
+
+// 分析结果处理脚本示例
+const fs = require('fs');
+const path = require('path');
+
+function analyzeSlitherResults(resultsPath) {
+  try {
+    const results = JSON.parse(fs.readFileSync(resultsPath, 'utf8'));
+    const findings = results.results.detectors || [];
+    
+    console.log(`共发现 ${findings.length} 个安全问题`);
+    
+    // 按严重程度分组
+    const severityGroups = {};
+    findings.forEach(finding => {
+      const severity = finding.severity || 'unknown';
+      if (!severityGroups[severity]) {
+        severityGroups[severity] = [];
+      }
+      severityGroups[severity].push(finding);
+    });
+    
+    // 输出问题详情
+    Object.entries(severityGroups).forEach(([severity, issues]) => {
+      console.log(`\n=== ${severity.toUpperCase()} (${issues.length}):`);
+      issues.forEach((issue, index) => {
+        console.log(`\n${index + 1}. ${issue.check}`);
+        console.log(`   描述: ${issue.description}`);
+        console.log(`   影响文件: ${issue.contract}`);
+        console.log(`   受影响行: ${issue.lines.join(', ')}`);
+      });
+    });
+    
+    return { total: findings.length, bySeverity: severityGroups };
+  } catch (error) {
+    console.error('分析Slither结果失败:', error);
+    return null;
+  }
+}
+
+// 使用示例
+const results = analyzeSlitherResults('./results.json');
+```
+
+#### 常见漏洞防范
+
+```solidity
+// 重入攻击防范示例
+contract SecureNFTMarketplace is ReentrancyGuard {
+    // 使用OpenZeppelin的ReentrancyGuard
+    // 在所有外部函数中使用nonReentrant修饰器
+    
+    function withdraw() external nonReentrant {
+        uint256 amount = balances[msg.sender];
+        require(amount > 0, "No balance");
+        
+        // 重要: 先更新状态，再发送ETH
+        balances[msg.sender] = 0;
+        
+        // 然后再转账
+        (bool success, ) = msg.sender.call{value: amount}("");
+        require(success, "Transfer failed");
+    }
+}
+
+// 整数溢出防范
+contract SafeMathExample {
+    // 使用Solidity 0.8+内置的溢出检查
+    function safeMultiply(uint256 a, uint256 b) public pure returns (uint256) {
+        return a * b; // 0.8+会自动检查溢出
+    }
+}
+
+// 访问控制示例
+contract RoleBasedAccessNFT {
+    // 角色定义
+    bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
+    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
+    
+    // 使用OpenZeppelin的AccessControl
+    using AccessControl for AccessControl.Role;
+    mapping(bytes32 => AccessControl.Role) private _roles;
+    
+    constructor() {
+        _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _setupRole(ADMIN_ROLE, msg.sender);
+    }
+    
+    // 只有minter角色可以铸造NFT
+    function mint(address to, uint256 tokenId) external onlyRole(MINTER_ROLE) {
+        // 铸造逻辑
+    }
+}
+```
+
+### 5.2 部署流程与监控
+
+#### 自动化部署脚本
+
+```javascript
+// 使用Hardhat自动化部署NFT合约
+const { ethers } = require("hardhat");
+
+async function main() {
+  // 部署NFT合约
+  const NFTContract = await ethers.getContractFactory("MyNFT");
+  
+  console.log("部署NFT合约中...");
+  const nftContract = await NFTContract.deploy(
+    "My Awesome NFT",  // 名称
+    "MANFT",         // 符号
+    "ipfs://Qm.../", // 基础URI
+    1000,            // 最大供应量
+    ethers.utils.parseEther("0.01") // 铸造价格
+  );
+  
+  await nftContract.deployed();
+  
+  console.log("NFT合约已部署到:", nftContract.address);
+  
+  // 部署市场合约
+  const MarketplaceContract = await ethers.getContractFactory("NFTMarketplace");
+  
+  console.log("部署市场合约中...");
+  const marketplaceContract = await MarketplaceContract.deploy(
+    ethers.constants.AddressZero // 费用接收地址（可以是合约所有者）
+  );
+  
+  await marketplaceContract.deployed();
+  
+  console.log("市场合约已部署到:", marketplaceContract.address);
+  
+  // 保存部署信息
+  const fs = require("fs");
+  const deployments = {
+    nft: nftContract.address,
+    marketplace: marketplaceContract.address,
+    timestamp: Date.now()
+  };
+  
+  fs.writeFileSync(
+    "deployments.json",
+    JSON.stringify(deployments, null, 2)
+  );
+  
+  console.log("部署信息已保存到deployments.json");
+  
+  // 验证合约（可选，需要API密钥）
+  try {
+    await run("verify:verify", {
+      address: nftContract.address,
+      constructorArguments: [
+        "My Awesome NFT",
+        "MANFT",
+        "ipfs://Qm.../",
+        1000,
+        ethers.utils.parseEther("0.01")
+      ],
+    });
+    
+    await run("verify:verify", {
+      address: marketplaceContract.address,
+      constructorArguments: [ethers.constants.AddressZero],
+    });
+  } catch (error) {
+    console.log("合约验证失败:", error.message);
+  }
+}
+
+main()
+  .then(() => process.exit(0))
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+```
+
+#### 实时监控系统
+
+```javascript
+// 使用The Graph监控区块链事件
+// 1. 定义Subgraph映射
+
+// schema.graphql
+/*
+type NFT @entity {
+  id: ID!
+  tokenId: BigInt!
+  contract: Bytes!
+  owner: Bytes!
+  metadataURI: String
+  createdAtTimestamp: BigInt!
+  createdAtBlockNumber: BigInt!
+  
+  # 市场相关字段
+  isListed: Boolean!
+  price: BigInt
+  listingType: String
+  listingDate: BigInt
+  lastSalePrice: BigInt
+}
+
+type MarketplaceEvent @entity {
+  id: ID!
+  type: String!
+  nft: NFT!
+  buyer: Bytes
+  seller: Bytes
+  price: BigInt
+  timestamp: BigInt!
+  blockNumber: BigInt!
+}
+*/
+
+// mapping.ts
+import { Transfer as TransferEvent } from '../generated/MyNFT/MyNFT';
+import { ListingCreated, ItemSold, BidPlaced, AuctionEnded } from '../generated/Marketplace/Marketplace';
+import { NFT, MarketplaceEvent } from '../generated/schema';
+
+export function handleTransfer(event: TransferEvent): void {
+  let nft = NFT.load(event.params.tokenId.toString());
+  
+  if (nft == null) {
+    // 首次铸造
+    nft = new NFT(event.params.tokenId.toString());
+    nft.tokenId = event.params.tokenId;
+    nft.contract = event.address;
+    nft.isListed = false;
+    nft.createdAtTimestamp = event.block.timestamp;
+    nft.createdAtBlockNumber = event.block.number;
+  }
+  
+  // 更新所有者
+  nft.owner = event.params.to;
+  nft.save();
+  
+  // 创建转移事件
+  let marketEvent = new MarketplaceEvent(event.transaction.hash.toHexString() + '-' + event.logIndex.toString());
+  marketEvent.type = 'TRANSFER';
+  marketEvent.nft = nft.id;
+  marketEvent.seller = event.params.from;
+  marketEvent.buyer = event.params.to;
+  marketEvent.timestamp = event.block.timestamp;
+  marketEvent.blockNumber = event.block.number;
+  marketEvent.save();
+}
+
+export function handleListingCreated(event: ListingCreated): void {
+  let nftId = event.params.tokenId.toString();
+  let nft = NFT.load(nftId);
+  
+  if (nft != null) {
+    nft.isListed = true;
+    nft.price = event.params.price;
+    nft.listingDate = event.block.timestamp;
+    nft.listingType = event.params.listingType == 0 ? 'FIXED_PRICE' : 'AUCTION';
+    nft.save();
+    
+    // 创建上架事件
+    let marketEvent = new MarketplaceEvent(event.transaction.hash.toHexString() + '-' + event.logIndex.toString());
+    marketEvent.type = 'LISTING_CREATED';
+    marketEvent.nft = nft.id;
+    marketEvent.seller = event.params.seller;
+    marketEvent.price = event.params.price;
+    marketEvent.timestamp = event.block.timestamp;
+    marketEvent.blockNumber = event.block.number;
+    marketEvent.save();
+  }
+}
+
+export function handleItemSold(event: ItemSold): void {
+  let nftId = event.params.tokenId.toString();
+  let nft = NFT.load(nftId);
+  
+  if (nft != null) {
+    nft.isListed = false;
+    nft.lastSalePrice = event.params.price;
+    nft.save();
+    
+    // 创建售出事件
+    let marketEvent = new MarketplaceEvent(event.transaction.hash.toHexString() + '-' + event.logIndex.toString());
+    marketEvent.type = 'ITEM_SOLD';
+    marketEvent.nft = nft.id;
+    marketEvent.seller = event.params.seller;
+    marketEvent.buyer = event.params.buyer;
+    marketEvent.price = event.params.price;
+    marketEvent.timestamp = event.block.timestamp;
+    marketEvent.blockNumber = event.block.number;
+    marketEvent.save();
+  }
+}
+```
+
+### 5.3 用户体验优化
+
+提供流畅的用户体验对于NFT和元宇宙项目的成功至关重要。
+
+```javascript
+// React前端性能优化示例
+import React, { useState, useEffect, useMemo, useCallback, Suspense } from 'react';
+import { ethers } from 'ethers';
+import { useWeb3React } from '@web3-react/core';
+import NFTGrid from './components/NFTGrid';
+import LoadingSpinner from './components/LoadingSpinner';
+
+const NFTMarketplaceApp = () => {
+  const { account, library, chainId } = useWeb3React();
+  const [nfts, setNfts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filters, setFilters] = useState({
+    collection: null,
+    priceRange: { min: 0, max: 100 },
+    sortBy: 'latest', // latest, price_low, price_high
+    searchTerm: ''
+  });
+  
+  // 性能优化：使用useCallback缓存获取NFT的函数
+  const fetchNFTs = useCallback(async () => {
+    if (!library || !chainId) return;
+    
+    setLoading(true);
+    try {
+      // 使用分页获取NFT数据
+      const pageSize = 20;
+      const currentPage = 1;
+      
+      // 构建GraphQL查询
+      const query = `
+        query GetNFTs($first: Int!, $skip: Int!, $where: NFT_filter) {
+          nfts(first: $first, skip: $skip, orderBy: createdAtTimestamp, orderDirection: desc, where: $where) {
+            id
+            tokenId
+            contract
+            owner
+            metadataURI
+            isListed
+            price
+            listingType
+            createdAtTimestamp
+          }
+        }
+      `;
+      
+      // 构建过滤条件
+      const whereClause = {
+        ...(filters.collection && { contract: filters.collection }),
+        ...(filters.priceRange.min > 0 && { price_gt: ethers.utils.parseEther(filters.priceRange.min.toString()) }),
+        ...(filters.priceRange.max < 100 && { price_lt: ethers.utils.parseEther(filters.priceRange.max.toString()) }),
+        isListed: true
+      };
+      
+      // 发送GraphQL请求
+      const response = await fetch('https://api.thegraph.com/subgraphs/name/your-subgraph', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          query,
+          variables: {
+            first: pageSize,
+            skip: (currentPage - 1) * pageSize,
+            where: whereClause
+          }
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (data.data && data.data.nfts) {
+        // 并行获取NFT元数据
+        const nftsWithMetadata = await Promise.all(
+          data.data.nfts.map(async (nft) => {
+            try {
+              // 使用缓存的元数据
+              const cachedMetadata = localStorage.getItem(`metadata_${nft.id}`);
+              if (cachedMetadata) {
+                return { ...nft, metadata: JSON.parse(cachedMetadata) };
+              }
+              
+              // 解析IPFS URI
+              const metadataUrl = nft.metadataURI.replace('ipfs://', 'https://ipfs.io/ipfs/');
+              const metadataResponse = await fetch(metadataUrl, { timeout: 5000 });
+              const metadata = await metadataResponse.json();
+              
+              // 缓存元数据
+              localStorage.setItem(`metadata_${nft.id}`, JSON.stringify(metadata));
+              
+              return { ...nft, metadata };
+            } catch (error) {
+              console.error('获取元数据失败:', error);
+              // 返回带默认元数据的NFT
+              return { 
+                ...nft, 
+                metadata: { 
+                  name: `NFT #${nft.tokenId}`, 
+                  description: '元数据加载失败',
+                  image: 'https://via.placeholder.com/300'
+                } 
+              };
+            }
+          })
+        );
+        
+        setNfts(nftsWithMetadata);
+      }
+    } catch (error) {
+      console.error('获取NFT失败:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [library, chainId, filters]);
+  
+  // 性能优化：使用useEffect依赖fetchNFTs函数
+  useEffect(() => {
+    fetchNFTs();
+  }, [fetchNFTs]);
+  
+  // 性能优化：使用useMemo进行排序和过滤
+  const sortedAndFilteredNFTs = useMemo(() => {
+    let filtered = [...nfts];
+    
+    // 搜索过滤
+    if (filters.searchTerm) {
+      const searchLower = filters.searchTerm.toLowerCase();
+      filtered = filtered.filter(nft => 
+        nft.metadata?.name?.toLowerCase().includes(searchLower) ||
+        nft.metadata?.description?.toLowerCase().includes(searchLower)
+      );
+    }
+    
+    // 排序
+    switch (filters.sortBy) {
+      case 'price_low':
+        return filtered.sort((a, b) => a.price - b.price);
+      case 'price_high':
+        return filtered.sort((a, b) => b.price - a.price);
+      case 'latest':
+      default:
+        return filtered.sort((a, b) => b.createdAtTimestamp - a.createdAtTimestamp);
+    }
+  }, [nfts, filters]);
+  
+  // 更新过滤条件
+  const updateFilters = (newFilters) => {
+    setFilters(prev => ({ ...prev, ...newFilters }));
+  };
+  
+  return (
+    <div className="nft-marketplace-app">
+      <header>{
+        // 头部组件
+      }</header>
+      
+      <div className="filters-section">
+        {/* 过滤组件 */}
+      </div>
+      
+      <main className="nft-content">
+        {loading ? (
+          <LoadingSpinner />
+        ) : (
+          <Suspense fallback={<LoadingSpinner />}>
+            <NFTGrid 
+              nfts={sortedAndFilteredNFTs} 
+              loading={loading}
+            />
+          </Suspense>
+        )}
+      </main>
+    </div>
+  );
+};
+
+export default NFTMarketplaceApp;
+```
+
+## 6. 未来趋势与发展方向
+
+### 6.1 NFT 2.0标准
+
+新一代NFT标准正在发展，提供更丰富的功能和更好的互操作性。
+
+- **EIP-4804**：支持NFT直接在L2和跨链环境中使用
+- **EIP-5114**：可分割NFT（Fractional NFTs）标准
+- **EIP-5773**：具有生命周期的NFT
+- **跨链NFT**：在多个区块链上同时存在的NFT
+
+### 6.2 元宇宙互操作性
+
+未来的元宇宙将更加互联互通，用户可以无缝地在不同平台间移动资产和身份。
+
+```javascript
+// 跨元宇宙资产桥接示例
+class MetaverseAssetBridge {
+  constructor(config) {
+    this.providers = config.providers; // 不同区块链的提供者
+    this.bridgeContracts = config.bridgeContracts; // 桥接合约
+    this.assetContracts = config.assetContracts; // 资产合约
+    this.ipfsClient = config.ipfsClient; // IPFS客户端
+  }
+  
+  // 跨链转移NFT
+  async transferNFTToMetaverse(sourceChain, targetChain, tokenId, ownerPrivateKey) {
+    try {
+      // 1. 获取源链上的NFT信息
+      const sourceProvider = this.providers[sourceChain];
+      const sourceContract = new ethers.Contract(
+        this.assetContracts[sourceChain].address,
+        this.assetContracts[sourceChain].abi,
+        sourceProvider
+      );
+      
+      const tokenURI = await sourceContract.tokenURI(tokenId);
+      const owner = await sourceContract.ownerOf(tokenId);
+      
+      // 2. 将NFT锁定在桥接合约中
+      const wallet = new ethers.Wallet(ownerPrivateKey, sourceProvider);
+      const bridgeContract = new ethers.Contract(
+        this.bridgeContracts[sourceChain].address,
+        this.bridgeContracts[sourceChain].abi,
+        wallet
+      );
+      
+      // 确保已授权
+      const isApproved = await sourceContract.isApprovedForAll(
+        wallet.address,
+        bridgeContract.address
+      );
+      
+      if (!isApproved) {
+        const approveTx = await sourceContract.setApprovalForAll(
+          bridgeContract.address,
+          true
+        );
+        await approveTx.wait();
+        console.log('已授权NFT给桥接合约');
+      }
+      
+      // 锁定NFT
+      const lockTx = await bridgeContract.lockNFT(
+        this.assetContracts[sourceChain].address,
+        tokenId,
+        targetChain
+      );
+      const receipt = await lockTx.wait();
+      console.log('NFT已锁定在源链上:', receipt.transactionHash);
+      
+      // 3. 在目标链上铸造对应的NFT
+      // 这部分通常需要预言机或桥接服务来验证和执行
+      console.log(`准备在目标链 ${targetChain} 上铸造NFT`);
+      
+      return {
+        success: true,
+        sourceTxHash: receipt.transactionHash,
+        tokenId,
+        sourceChain,
+        targetChain
+      };
+    } catch (error) {
+      console.error('跨链转移NFT失败:', error);
+      throw error;
+    }
+  }
+  
+  // 获取资产在所有元宇宙中的状态
+  async getAssetCrossMetaverseStatus(tokenId, originalChain) {
+    // 实现获取资产在不同元宇宙中的状态
+    // ...
+  }
+}
+```
+
+### 6.3 AI与NFT/元宇宙集成
+
+人工智能技术正在为NFT和元宇宙带来创新应用。
+
+- **AI生成NFT**：使用GAN和其他生成模型创建独特的NFT艺术品
+- **智能NPC**：在元宇宙中使用AI驱动的非玩家角色
+- **个性化体验**：基于用户行为和偏好定制元宇宙体验
+- **AI辅助创作工具**：帮助创作者设计和构建元宇宙内容
+
+### 6.4 可持续发展
+
+随着区块链技术的发展，可持续性问题日益受到关注。
+
+- **PoS区块链**：使用权益证明机制的区块链能耗大幅降低
+- **碳抵消计划**：许多NFT项目正在实施碳抵消措施
+- **Layer 2解决方案**：通过Layer 2扩展减少每条交易的能源消耗
+- **可持续NFT标准**：正在开发的新标准将内置可持续性考虑
+
+## 结论
+
+NFT和元宇宙技术正在迅速发展，为创作者、开发者和用户提供了前所未有的机会。通过本文介绍的技术栈和实现方法，开发者可以构建完整的NFT与元宇宙应用，从代币标准到元数据存储，从市场功能到3D/VR/AR集成，再到安全部署和性能优化。
+
+随着Web3生态系统的不断成熟，NFT和元宇宙将继续融合，创造更加沉浸式、互联和用户友好的数字体验。开发者应该保持学习最新的技术标准和最佳实践，以构建真正创新的Web3应用。

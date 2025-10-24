@@ -1,0 +1,2811 @@
+---
+title: Web3进阶级项目实战指南-Swap应用_NFT铸造_DAO投票系统
+publishedAt: 2025-10-24
+summary: 本文档详细介绍如何使用Next.js 16.0.0、React 19.2.0、TailwindCSS 4.0.0等技术栈构建三个进阶级Web3项目：简易Swap应用、NFT铸造平台和DAO投票系统，包含完整的项目架构、代码实现和最佳实践。
+tags:
+  - web3
+  - nextjs
+  - react
+  - wagmi
+  - ethers
+  - nft
+  - defi
+  - dao
+---
+
+# Web3进阶级项目实战指南
+
+## 技术栈概览
+
+本文档将使用以下最新技术栈构建Web3进阶级项目：
+
+- **前端框架**：Next.js 16.0.0 + React 19.2.0
+- **样式方案**：TailwindCSS 4.0.0
+- **区块链交互**：Ethers 6.15.0 + Wagmi 2.18.1 + Viem 2.38.3
+- **钱包集成**：RainbowKit 2.2.9
+- **状态管理**：Zustand 5.0.8
+- **开发环境**：Node.js 20+
+
+## 开发环境搭建
+
+### 1. 创建Next.js项目
+
+```bash
+npx create-next-app@latest web3-advanced-projects --typescript --tailwind --eslint
+cd web3-advanced-projects
+```
+
+### 2. 安装核心依赖
+
+```bash
+# 安装指定版本的依赖
+npm install ethers@6.15.0 wagmi@2.18.1 rainbowkit@2.2.9 viem@2.38.3 zustand@5.0.8
+
+# 更新Next.js和React到指定版本
+npm install next@16.0.0 react@19.2.0 react-dom@19.2.0
+
+# 更新TailwindCSS到指定版本
+npm install -D tailwindcss@4.0.0 postcss@latest autoprefixer@latest
+```
+
+### 3. Web3环境配置
+
+创建环境配置文件 `.env.local`：
+
+```env
+# 基础配置
+# 如何获取WalletConnect Project ID:
+# 1. 访问 WalletConnect Cloud (https://cloud.walletconnect.com/)
+# 2. 注册或登录您的账号
+# 3. 创建一个新的项目或使用现有项目
+# 4. 复制项目页面中的Project ID
+NEXT_PUBLIC_PROJECT_ID=your_wallet_connect_project_id
+
+# RPC端点配置
+# 如何获取Infura API Key:
+# 1. 访问 Infura官网 (https://infura.io/)
+# 2. 注册或登录您的账号
+# 3. 在控制台中点击 "Create New Project"
+# 4. 填写项目名称并选择合适的网络
+# 5. 创建完成后，在项目详情页复制API Key
+NEXT_PUBLIC_INFURA_KEY=your_infura_api_key
+
+# 如何获取Alchemy API Key:
+# 1. 访问 Alchemy官网 (https://www.alchemy.com/)
+# 2. 注册或登录您的账号
+# 3. 在仪表板中点击 "Create App"
+# 4. 选择网络类型和链
+# 5. 完成创建后，在应用详情页复制API Key
+NEXT_PUBLIC_ALCHEMY_KEY=your_alchemy_api_key
+
+# 合约地址（示例）
+# 如何获取Uniswap合约地址:
+# 方法1: 通过Uniswap官方文档或GitHub仓库获取
+#        GitHub: https://github.com/Uniswap/v2-core/tree/master/contracts
+#        官方文档: https://docs.uniswap.org/
+#
+# 方法2: 通过区块链浏览器查询 (推荐)
+#        1. 访问 Etherscan: https://etherscan.io/
+#        2. 在搜索框中搜索 "Uniswap V2 Factory" 或 "Uniswap V2 Router"
+#        3. 验证合约地址是否匹配官方发布的地址
+#
+# 方法3: 使用各公链上的标准地址列表
+#        以太坊主网的标准地址如下：
+NEXT_PUBLIC_UNISWAP_FACTORY=0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f
+NEXT_PUBLIC_UNISWAP_ROUTER=0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D
+# 注意：在测试网或其他公链上，这些地址会有所不同，需要查询对应网络的官方文档
+```
+
+## 项目一：简易Swap应用
+
+### 功能概述
+
+构建一个简易的去中心化代币交换应用，支持：
+- 代币对选择与展示
+- 交易金额输入与滑点设置
+- 实时价格计算与交易路径分析
+- 交易执行与确认
+- 交易历史记录
+
+### 项目架构
+
+```
+src/
+├── app/
+│   ├── swap/
+│   │   ├── page.tsx         # 交易页面
+│   │   └── history.tsx      # 交易历史
+├── components/
+│   ├── SwapForm/            # 交易表单组件
+│   ├── TokenSelector/       # 代币选择器
+│   ├── PriceChart/          # 价格图表
+│   └── SwapHistory/         # 历史记录组件
+├── hooks/
+│   ├── useSwap.ts           # 交易逻辑钩子
+│   └── useTokenList.ts      # 代币列表钩子
+├── store/
+│   └── swapStore.ts         # 交易状态管理
+└── utils/
+    ├── swap.ts              # 交易相关工具函数
+    └── token.ts             # 代币相关工具函数
+```
+
+### 核心代码实现
+
+#### 1. 创建Swap状态管理
+
+```typescript
+// src/store/swapStore.ts
+import { create } from 'zustand';
+import { Address } from 'viem';
+
+interface SwapState {
+  inputToken: {
+    address: Address | null;
+    symbol: string;
+    decimals: number;
+  };
+  outputToken: {
+    address: Address | null;
+    symbol: string;
+    decimals: number;
+  };
+  inputAmount: string;
+  outputAmount: string;
+  slippage: number;
+  setInputToken: (token: SwapState['inputToken']) => void;
+  setOutputToken: (token: SwapState['outputToken']) => void;
+  setInputAmount: (amount: string) => void;
+  setOutputAmount: (amount: string) => void;
+  setSlippage: (slippage: number) => void;
+  swapTokens: () => void;
+}
+
+export const useSwapStore = create<SwapState>((set) => ({
+  inputToken: {
+    address: null,
+    symbol: 'ETH',
+    decimals: 18,
+  },
+  outputToken: {
+    address: null,
+    symbol: 'USDT',
+    decimals: 6,
+  },
+  inputAmount: '',
+  outputAmount: '',
+  slippage: 0.5,
+  setInputToken: (token) => set({ inputToken: token }),
+  setOutputToken: (token) => set({ outputToken: token }),
+  setInputAmount: (amount) => set({ inputAmount: amount }),
+  setOutputAmount: (amount) => set({ outputAmount: amount }),
+  setSlippage: (slippage) => set({ slippage }),
+  swapTokens: () => set((state) => ({
+    inputToken: state.outputToken,
+    outputToken: state.inputToken,
+    inputAmount: state.outputAmount,
+    outputAmount: state.inputAmount,
+  })),
+}));
+```
+
+#### 2. 创建Swap逻辑Hook
+
+```typescript
+// src/hooks/useSwap.ts
+import { useMemo, useState } from 'react';
+import { useAccount, useWriteContract, useSendTransaction, useReadContract } from 'wagmi';
+import { useSwapStore } from '../store/swapStore';
+import { parseUnits, formatUnits } from 'viem';
+
+// 以下是获取Uniswap V2 Router ABI的方法说明
+// 方法1：通过npm包直接导入
+// 安装依赖: npm install @uniswap/v2-periphery
+// import routerAbi from '@uniswap/v2-periphery/build/UniswapV2Router02.json';
+
+// 方法2：从GitHub仓库获取后保存到本地
+// 从https://github.com/Uniswap/uniswap-v2-periphery/blob/master/contracts/interfaces/IUniswapV2Router02.sol获取接口定义
+// 使用工具如hardhat或truffle生成ABI文件
+// 或直接从区块浏览器(如Etherscan)的合约页面复制ABI
+
+import { IUniswapV2Router02ABI } from '../abis/IUniswapV2Router02';
+
+// 定义SwapResult接口，确保类型安全
+interface SwapResult {
+  amountOut: bigint;        // 考虑滑点后的最小输出量
+  amountOutRaw?: bigint;    // 原始输出量(可选)，用于显示
+  path: `0x${string}`[];    // 交易路径
+  deadline: number;         // 交易截止时间戳
+}
+  
+// 获取Uniswap Router地址
+const ROUTER_ADDRESS = process.env.NEXT_PUBLIC_UNISWAP_ROUTER as `0x${string}`;
+
+// 引入必要的库和类型
+export function useSwap() {
+  const { address } = useAccount();
+  const {
+    inputToken,
+    outputToken,
+    inputAmount,
+    slippage,
+  } = useSwapStore();
+  
+  // 验证必要的环境变量是否存在
+  if (!ROUTER_ADDRESS) {
+    console.error('Uniswap Router地址未配置，请检查环境变量');
+  }
+  
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  
+  const { writeContract } = useWriteContract();
+  const { sendTransaction } = useSendTransaction();
+  
+  // 使用useReadContract hook进行实时价格查询（生产环境推荐）
+  const { data: amounts, isLoading: isCalculating, error: calculateError } = useReadContract({
+    address: ROUTER_ADDRESS,
+    abi: IUniswapV2Router02ABI,
+    functionName: 'getAmountsOut',
+    args: inputToken.address && outputToken.address && inputAmount ? [
+      parseUnits(inputAmount, inputToken.decimals), 
+      [inputToken.address, outputToken.address]
+    ] : undefined,
+    enabled: !!ROUTER_ADDRESS && !!inputToken.address && !!outputToken.address && !!inputAmount && !!address
+  });
+  
+  // 计算最小输出量（考虑滑点）
+  const minAmountOut = useMemo(() => {
+    if (!amounts || amounts.length < 2) return null;
+    
+    const amountOut = amounts[amounts.length - 1] as bigint;
+    const slippageAmount = (amountOut * BigInt(Math.floor(slippage * 100))) / BigInt(10000);
+    return amountOut - slippageAmount;
+  }, [amounts, slippage]);
+  
+  // 计算输出金额 - 实际生产环境完整实现
+  const calculateOutputAmount = async (): Promise<SwapResult | null> => {
+    if (!ROUTER_ADDRESS) {
+      const errorMsg = 'Uniswap Router地址未配置，无法执行交易';
+      console.error(errorMsg);
+      setError(errorMsg);
+      return null;
+    }
+    
+    if (!inputToken.address || !outputToken.address || !inputAmount || !address) {
+      return null;
+    }
+    
+    try {
+      setIsLoading(true);
+      setError(null);
+      
+      // 构建交易路径
+      const path = [inputToken.address, outputToken.address];
+      const deadline = Math.floor(Date.now() / 1000) + 60 * 20; // 20分钟
+      
+      // 转换输入金额为合约需要的格式（带小数位的BigInt）
+      const amountIn = parseUnits(inputAmount, inputToken.decimals);
+      
+      // 实际调用Uniswap Router合约的getAmountsOut函数获取精确输出金额
+      // 注意：这里使用手动调用方式，在实际组件中可以依赖上面的useContractRead hook
+      // 但在函数内部需要时，我们需要直接调用
+      const amounts = await readContract({
+        address: ROUTER_ADDRESS,
+        abi: IUniswapV2Router02ABI,
+        functionName: 'getAmountsOut',
+        args: [amountIn, path]
+      });
+      
+      // amounts是一个数组，包含路径中每个代币的数量，最后一个是输出代币数量
+      const amountOut = amounts[amounts.length - 1] as bigint;
+      
+      // 应用滑点保护，计算最小可接受输出量
+      const slippageAmount = (amountOut * BigInt(Math.floor(slippage * 100))) / BigInt(10000);
+      const minAmountOut = amountOut - slippageAmount;
+      
+      // 添加详细日志用于调试和用户信息展示
+      console.log(`输入: ${formatUnits(amountIn, inputToken.decimals)} ${inputToken.symbol}`);
+      console.log(`预期输出: ${formatUnits(amountOut, outputToken.decimals)} ${outputToken.symbol}`);
+      console.log(`滑点设置: ${slippage}%`);
+      console.log(`最小可接受输出: ${formatUnits(minAmountOut, outputToken.decimals)} ${outputToken.symbol}`);
+      console.log(`交易路径: ${path.join(' -> ')}`);
+      console.log(`交易截止时间: ${new Date(deadline * 1000).toLocaleString()}`);
+      
+      // 返回完整的交易参数对象
+      return { 
+        amountOut: minAmountOut, // 返回考虑滑点后的最小输出量
+        amountOutRaw: amountOut, // 保存原始输出量用于显示
+        path, 
+        deadline 
+      };
+    } catch (err) {
+      // 错误处理和日志记录
+      const errorMessage = err instanceof Error ? err.message : '计算输出金额失败';
+      setError(`计算输出金额失败: ${errorMessage}`);
+      console.error('Calculate output error:', err);
+      return null;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  // 替代方案：如果无法使用wagmi的readContract，可以使用ethers直接调用
+  // 这个替代方案在某些特殊场景下有用，如需要自定义提供者或特殊配置
+  const calculateOutputAmountAlternative = async (): Promise<SwapResult | null> => {
+    if (!inputToken.address || !outputToken.address || !inputAmount || !address) {
+      return null;
+    }
+    
+    try {
+      setIsLoading(true);
+      setError(null);
+      
+      // 创建ethers提供者和合约实例
+      const provider = new ethers.providers.Web3Provider(window.ethereum);
+      const routerContract = new ethers.Contract(
+        ROUTER_ADDRESS,
+        IUniswapV2Router02ABI,
+        provider
+      );
+      
+      // 构建交易参数
+      const path = [inputToken.address, outputToken.address];
+      const deadline = Math.floor(Date.now() / 1000) + 60 * 20; // 20分钟
+      const amountIn = ethers.utils.parseUnits(inputAmount, inputToken.decimals);
+      
+      // 调用合约方法
+      const amounts = await routerContract.getAmountsOut(amountIn, path);
+      
+      // 处理结果
+      const amountOut = BigInt(amounts[1].toString());
+      const slippageAmount = (amountOut * BigInt(Math.floor(slippage * 100))) / BigInt(10000);
+      const minAmountOut = amountOut - slippageAmount;
+      
+      return { 
+        amountOut: minAmountOut, 
+        amountOutRaw: amountOut, 
+        path, 
+        deadline 
+      };
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : '计算输出金额失败';
+      setError(`计算输出金额失败: ${errorMessage}`);
+      console.error('Alternative calculate output error:', err);
+      return null;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  // 实际生产环境中，我们可以添加交易验证逻辑，确保交易安全
+  const validateTransaction = (swapResult: SwapResult): { isValid: boolean; message?: string } => {
+    // 检查滑点是否合理（一般不超过5%）
+    if (slippage > 5) {
+      return { isValid: false, message: '滑点设置过高，建议不超过5%' };
+    }
+    
+    // 检查输出金额是否过小（防止极端市场波动）
+    const outputAmountFormatted = formatUnits(swapResult.amountOut, outputToken.decimals);
+    if (parseFloat(outputAmountFormatted) < 0.0001) {
+      return { isValid: false, message: '预期输出金额过小，请检查输入金额或市场流动性' };
+    }
+    
+    return { isValid: true };
+  };
+  
+  // 执行交换
+  const executeSwap = async () => {
+    if (!ROUTER_ADDRESS) {
+      setError('Uniswap Router地址未配置，无法执行交易');
+      return;
+    }
+    
+    if (!address) {
+      setError('请先连接钱包');
+      return;
+    }
+    
+    const swapResult = await calculateOutputAmount();
+    if (!swapResult) return;
+    
+    try {
+      setIsLoading(true);
+      
+      const amountIn = parseUnits(inputAmount, inputToken.decimals);
+      
+      // 使用与calculateOutputAmount一致的滑点计算方式
+      const slippageAmount = (swapResult.amountOut * BigInt(Math.floor(slippage * 100))) / BigInt(10000);
+      const minAmountOut = swapResult.amountOut - slippageAmount;
+      
+      // 交易配置 - 添加gas优化选项
+      const txConfig = {
+        // 可选：设置gas限制以避免交易失败
+        // gas: BigInt(300000),
+        // gasPrice: undefined, // 让钱包自动计算最优gas价格
+      };
+      
+      // 对于ETH输入的情况 (通常ETH的address表示为0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE或特殊处理)
+      const isInputETH = inputToken.symbol === 'ETH' || inputToken.address === '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
+      const isOutputETH = outputToken.symbol === 'ETH' || outputToken.address === '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
+      
+      // 非ETH输入时，需要检查并处理代币授权
+      if (!isInputETH) {
+        // 检查授权状态
+        const allowance = await readContract({
+          address: inputToken.address,
+          abi: [
+            {
+              "constant": true,
+              "inputs": [
+                { "name": "owner", "type": "address" },
+                { "name": "spender", "type": "address" }
+              ],
+              "name": "allowance",
+              "outputs": [{ "name": "", "type": "uint256" }],
+              "payable": false,
+              "stateMutability": "view",
+              "type": "function"
+            }
+          ],
+          functionName: 'allowance',
+          args: [address, ROUTER_ADDRESS]
+        });
+        
+        // 如果授权不足，请求授权
+        if (BigInt(allowance) < amountIn) {
+          console.log('需要授权代币给Router');
+          
+          // 授权操作
+          await writeContract({
+            ...txConfig,
+            address: inputToken.address,
+            abi: [
+              {
+                "constant": false,
+                "inputs": [
+                  { "name": "spender", "type": "address" },
+                  { "name": "value", "type": "uint256" }
+                ],
+                "name": "approve",
+                "outputs": [{ "name": "", "type": "bool" }],
+                "payable": false,
+                "stateMutability": "nonpayable",
+                "type": "function"
+              }
+            ],
+            functionName: 'approve',
+            args: [ROUTER_ADDRESS, amountIn]
+          });
+          
+          // 等待授权完成，给用户一些时间确认交易
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+      
+      if (isInputETH && !isOutputETH) {
+        // ETH换代币
+        writeContract({
+          ...txConfig,
+          address: ROUTER_ADDRESS,
+          abi: IUniswapV2Router02ABI,
+          functionName: 'swapExactETHForTokens',
+          args: [
+            minAmountOut,
+            swapResult.path.map(p => p as `0x${string}`),
+            address,
+            swapResult.deadline,
+          ],
+          value: amountIn,
+        });
+      } else if (!isInputETH && isOutputETH) {
+        // 代币换ETH
+        writeContract({
+          ...txConfig,
+          address: ROUTER_ADDRESS,
+          abi: IUniswapV2Router02ABI,
+          functionName: 'swapExactTokensForETH',
+          args: [
+            amountIn,
+            minAmountOut,
+            swapResult.path.map(p => p as `0x${string}`),
+            address,
+            swapResult.deadline,
+          ],
+        });
+      } else {
+        // 代币换代币
+        writeContract({
+          ...txConfig,
+          address: ROUTER_ADDRESS,
+          abi: IUniswapV2Router02ABI,
+          functionName: 'swapExactTokensForTokens',
+          args: [
+            amountIn,
+            minAmountOut,
+            swapResult.path.map(p => p as `0x${string}`),
+            address,
+            swapResult.deadline,
+          ],
+        });
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : '交换执行失败';
+      setError(`交易失败: ${errorMessage}`);
+      console.error('Swap execution error:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  return {
+    calculateOutputAmount,
+    executeSwap,
+    isLoading,
+    error,
+  };
+}
+```
+
+#### 3. 创建Swap表单组件
+```tsx
+// TokenSelector 组件实现
+// src/components/TokenSelector/index.tsx
+'use client';
+
+import React, { useState, useEffect, useCallback } from 'react';
+import { ethers } from 'ethers';
+import { formatUnits } from 'viem';
+import { useAccount, useBalance } from 'wagmi';
+
+// 代币类型定义
+export interface Token {
+  address: `0x${string}`;
+  symbol: string;
+  name: string;
+  decimals: number;
+  logoURI?: string;
+}
+
+// 主网常见代币列表
+const COMMON_TOKENS: Token[] = [
+  {
+    address: '0x0000000000000000000000000000000000000000', // ETH
+    symbol: 'ETH',
+    name: 'Ethereum',
+    decimals: 18,
+    logoURI: 'https://etherscan.io/images/main/empty-token.png'
+  },
+  {
+    address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
+    symbol: 'USDC',
+    name: 'USD Coin',
+    decimals: 6,
+    logoURI: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png'
+  },
+  {
+    address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', // USDT
+    symbol: 'USDT',
+    name: 'Tether USD',
+    decimals: 6,
+    logoURI: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xdAC17F958D2ee523a2206206994597C13D831ec7/logo.png'
+  },
+  {
+    address: '0x6B175474E89094C44Da98b954EedeAC495271d0F', // DAI
+    symbol: 'DAI',
+    name: 'Dai Stablecoin',
+    decimals: 18,
+    logoURI: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0x6B175474E89094C44Da98b954EedeAC495271d0F/logo.png'
+  },
+  {
+    address: '0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984', // UNI
+    symbol: 'UNI',
+    name: 'Uniswap',
+    decimals: 18,
+    logoURI: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984/logo.png'
+  }
+];
+
+// ERC20代币ABI（只包含我们需要的方法）
+const ERC20_ABI = [
+  'function name() view returns (string)',
+  'function symbol() view returns (string)',
+  'function decimals() view returns (uint8)'
+];
+
+interface TokenSelectorProps {
+  value: Token | null;
+  onChange: (token: Token) => void;
+  label?: string;
+  className?: string;
+}
+
+export function TokenSelector({ value, onChange, label = 'Select Token', className }: TokenSelectorProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [customTokenAddress, setCustomTokenAddress] = useState('');
+  const [isAddingCustomToken, setIsAddingCustomToken] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [tokens, setTokens] = useState<Token[]>(COMMON_TOKENS);
+  
+  const { address } = useAccount();
+  
+  // 获取代币余额
+  const { data: balanceData } = useBalance({
+    address,
+    token: value?.address !== '0x0000000000000000000000000000000000000000' ? value?.address : undefined,
+    enabled: !!address && !!value
+  });
+  
+  // 搜索过滤代币
+  const filteredTokens = tokens.filter(token => 
+    token.symbol.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    token.name.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+  
+  // 添加自定义代币
+  const addCustomToken = useCallback(async () => {
+    if (!customTokenAddress) {
+      setError('请输入代币地址');
+      return;
+    }
+    
+    if (!ethers.utils.isAddress(customTokenAddress)) {
+      setError('无效的代币地址');
+      return;
+    }
+    
+    // 检查是否已添加
+    if (tokens.some(token => token.address.toLowerCase() === customTokenAddress.toLowerCase())) {
+      setError('此代币已添加');
+      return;
+    }
+    
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // 获取provider实例
+      const provider = new ethers.providers.Web3Provider(window.ethereum);
+      const tokenContract = new ethers.Contract(customTokenAddress, ERC20_ABI, provider);
+      
+      // 获取代币信息
+      const [name, symbol, decimals] = await Promise.all([
+        tokenContract.name(),
+        tokenContract.symbol(),
+        tokenContract.decimals()
+      ]);
+      
+      const newToken: Token = {
+        address: customTokenAddress as `0x${string}`,
+        name,
+        symbol,
+        decimals,
+        logoURI: `https://tokenlist.aave.com/${customTokenAddress}.png`
+      };
+      
+      setTokens(prev => [newToken, ...prev]);
+      onChange(newToken);
+      setCustomTokenAddress('');
+      setIsAddingCustomToken(false);
+      setIsOpen(false);
+    } catch (err) {
+      setError('获取代币信息失败，请确保这是有效的ERC20代币');
+      console.error('Error adding custom token:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [customTokenAddress, tokens, onChange]);
+  
+  // 选择代币
+  const handleSelectToken = (token: Token) => {
+    onChange(token);
+    setIsOpen(false);
+    setSearchTerm('');
+  };
+  
+  // 切换面板
+  const toggleAddingCustomToken = () => {
+    setIsAddingCustomToken(prev => !prev);
+    setError(null);
+  };
+  
+  // 处理点击外部关闭下拉菜单
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (!target.closest('.token-selector')) {
+        setIsOpen(false);
+        setIsAddingCustomToken(false);
+        setError(null);
+      }
+    };
+    
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+  
+  return (
+    <div className={`token-selector relative ${className}`}>
+      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+        {label}
+      </label>
+      
+      {/* 代币选择按钮 */}
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className={`w-full px-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-left flex items-center justify-between hover:border-blue-500 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent`}
+      >
+        {value ? (
+          <div className="flex items-center gap-3">
+            {value.logoURI && (
+              <img src={value.logoURI} alt={value.symbol} className="w-6 h-6 rounded-full" />
+            )}
+            <div>
+              <div className="font-medium">{value.symbol}</div>
+              {balanceData && (
+                <div className="text-xs text-gray-500 dark:text-gray-400">
+                  Balance: {formatUnits(balanceData.value, value.decimals).slice(0, 10)}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <span className="text-gray-400">选择代币</span>
+        )}
+        <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      
+      {/* 下拉菜单 */}
+      {isOpen && (
+        <div className="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg shadow-lg overflow-hidden">
+          {/* 搜索框 */}
+          <div className="p-3 border-b border-gray-200 dark:border-gray-700">
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="搜索代币名称或符号"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+              />
+              <svg className="absolute left-3 top-2.5 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </div>
+          </div>
+          
+          {/* 自定义代币添加或代币列表 */}
+          {isAddingCustomToken ? (
+            <div className="p-4">
+              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">添加自定义代币</h3>
+              <div className="space-y-3">
+                <input
+                  type="text"
+                  placeholder="0x..."
+                  value={customTokenAddress}
+                  onChange={(e) => setCustomTokenAddress(e.target.value)}
+                  className="w-full px-4 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                />
+                
+                {error && (
+                  <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+                )}
+                
+                <div className="flex gap-2">
+                  <button
+                    onClick={addCustomToken}
+                    disabled={loading}
+                    className={`flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-md transition-colors ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  >
+                    {loading ? '添加中...' : '添加代币'}
+                  </button>
+                  <button
+                    onClick={toggleAddingCustomToken}
+                    className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium rounded-md transition-colors dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-200"
+                  >
+                    取消
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* 代币列表 */}
+              {filteredTokens.length > 0 ? (
+                <ul className="max-h-[300px] overflow-y-auto">
+                  {filteredTokens.map(token => (
+                    <li key={token.address}>
+                      <button
+                        onClick={() => handleSelectToken(token)}
+                        className={`w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left ${value?.address === token.address ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
+                      >
+                        {token.logoURI && (
+                          <img src={token.logoURI} alt={token.symbol} className="w-6 h-6 rounded-full" />
+                        )}
+                        <div>
+                          <div className="font-medium">{token.symbol}</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">{token.name}</div>
+                        </div>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="p-6 text-center text-gray-500 dark:text-gray-400">
+                  未找到匹配的代币
+                </div>
+              )}
+              
+              {/* 添加自定义代币按钮 */}
+              <div className="border-t border-gray-200 dark:border-gray-700">
+                <button
+                  onClick={toggleAddingCustomToken}
+                  className="w-full px-4 py-3 text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
+                >
+                  添加自定义代币
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+```tsx
+// src/components/SwapForm/index.tsx
+import React, { useEffect } from 'react';
+import { useSwapStore } from '../../store/swapStore';
+import { useSwap } from '../../hooks/useSwap';
+import { TokenSelector } from '../components/TokenSelector';
+
+interface SwapFormProps {
+  className?: string;
+}
+
+export function SwapForm({ className }: SwapFormProps) {
+  const {
+    inputToken,
+    outputToken,
+    inputAmount,
+    outputAmount,
+    slippage,
+    setInputAmount,
+    setSlippage,
+    swapTokens,
+  } = useSwapStore();
+  
+  const { calculateOutputAmount, executeSwap, isLoading, error } = useSwap();
+  
+  // 当输入金额变化时，自动计算输出金额
+  useEffect(() => {
+    if (inputAmount) {
+      calculateOutputAmount();
+    }
+  }, [inputAmount, slippage, inputToken, outputToken]);
+  
+  const handleSwap = async () => {
+    await executeSwap();
+  };
+  
+  return (
+    <div className={`bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 ${className}`}>
+      <h2 className="text-2xl font-bold mb-6 text-center text-gray-900 dark:text-white">
+        代币交换
+      </h2>
+      
+      {/* 输入金额部分 */}
+      <div className="mb-6">
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+          输入金额
+        </label>
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={inputAmount}
+            onChange={(e) => setInputAmount(e.target.value)}
+            placeholder="0.0"
+            className="flex-1 p-3 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white"
+          />
+          <TokenSelector token={inputToken} onSelectToken={useSwapStore.getState().setInputToken} />
+        </div>
+      </div>
+      
+      {/* 交换按钮 */}
+      <div className="flex justify-center mb-6">
+        <button
+          onClick={swapTokens}
+          className="p-2 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-800 transition-colors"
+        >
+          ⇅
+        </button>
+      </div>
+      
+      {/* 输出金额部分 */}
+      <div className="mb-6">
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+          输出金额
+        </label>
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={outputAmount}
+            readOnly
+            className="flex-1 p-3 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-100 dark:bg-gray-600 text-gray-900 dark:text-white"
+          />
+          <TokenSelector token={outputToken} onSelectToken={useSwapStore.getState().setOutputToken} />
+        </div>
+      </div>
+      
+      {/* 滑点设置 */}
+      <div className="mb-6">
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+          滑点容忍度: {slippage}%
+        </label>
+        <input
+          type="range"
+          min="0.1"
+          max="5"
+          step="0.1"
+          value={slippage}
+          onChange={(e) => setSlippage(parseFloat(e.target.value))}
+          className="w-full"
+        />
+      </div>
+      
+      {/* 交换按钮 */}
+      <button
+        onClick={handleSwap}
+        disabled={isLoading || !inputAmount || !outputAmount}
+        className={`w-full py-3 px-6 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-md transition-colors ${isLoading ? 'opacity-70 cursor-not-allowed' : ''}`}
+      >
+        {isLoading ? '处理中...' : '交换'}
+      </button>
+      
+      {/* 错误提示 */}
+      {error && (
+        <p className="mt-4 text-red-500 text-center">{error}</p>
+      )}
+    </div>
+  );
+}
+```
+
+#### 4. 创建主页面
+
+```tsx
+// src/app/swap/page.tsx
+'use client';
+
+import { SwapForm } from '../../components/SwapForm';
+import { SwapHistory } from '../../components/SwapHistory';
+import { Web3Provider } from '../../app/providers';
+
+export default function SwapPage() {
+  return (
+    <main className="container mx-auto px-4 py-8 max-w-5xl">
+      <h1 className="text-4xl font-bold text-center mb-10 text-gray-900 dark:text-white">
+        去中心化代币交换
+      </h1>
+      
+      <div className="grid md:grid-cols-2 gap-8">
+        <SwapForm />
+        <div className="space-y-6">
+          <SwapHistory />
+          <div className="bg-blue-50 dark:bg-blue-900/30 p-4 rounded-lg border border-blue-200 dark:border-blue-700">
+            <h3 className="font-semibold text-blue-800 dark:text-blue-300 mb-2">安全提示</h3>
+            <p className="text-sm text-blue-700 dark:text-blue-400">
+              请确认交易详情和滑点设置。高波动性可能导致价格在交易确认前发生变化。
+              建议在测试网进行充分测试后再使用主网。
+            </p>
+          </div>
+        </div>
+      </div>
+    </main>
+  );
+}
+```
+
+### 部署与优化建议
+
+1. **优化建议**：
+   - 使用缓存减少RPC调用频率
+   - 实现本地代币列表缓存
+   - 添加交易状态监听
+   - 优化Gas费用计算
+
+2. **安全考虑**：
+   - 实施交易参数验证
+   - 添加价格影响警告
+   - 限制单次交易金额
+   - 实现交易超时处理
+
+## 项目二：NFT铸造平台
+
+### 功能概述
+
+构建一个支持用户创建和铸造NFT的平台，包括：
+- NFT集合创建与管理
+- 单个NFT铸造功能
+- NFT元数据管理（图片上传、属性设置）
+- 批量铸造支持
+- 铸造历史记录
+
+### 项目架构
+
+```
+src/
+├── app/
+│   ├── nft/
+│   │   ├── create/
+│   │   │   └── page.tsx     # 创建NFT页面
+│   │   ├── collections/
+│   │   │   └── page.tsx     # 我的集合页面
+│   │   └── page.tsx         # NFT平台首页
+├── components/
+│   ├── NFTCreator/          # NFT创建器组件
+│   ├── CollectionCard/      # 集合卡片组件
+│   ├── MetadataUploader/    # 元数据上传器
+│   └── MintingForm/         # 铸造表单组件
+├── hooks/
+│   ├── useNFT.ts            # NFT逻辑钩子
+│   └── useCollection.ts     # 集合管理钩子
+├── store/
+│   └── nftStore.ts          # NFT状态管理
+└── utils/
+    ├── ipfs.ts              # IPFS上传工具
+    └── nft.ts               # NFT相关工具函数
+```
+
+### 核心代码实现
+
+#### 1. NFT状态管理
+
+```typescript
+// src/store/nftStore.ts
+import { create } from 'zustand';
+import { Address } from 'viem';
+
+interface NFTMetadata {
+  name: string;
+  description: string;
+  image: string; // IPFS链接
+  attributes?: Array<{ trait_type: string; value: string | number }>;
+}
+
+interface NFTCollection {
+  address: Address | null;
+  name: string;
+  symbol: string;
+  description: string;
+  coverImage: string;
+}
+
+interface NFTStore {
+  currentCollection: NFTCollection;
+  metadata: NFTMetadata;
+  mintAmount: number;
+  setCurrentCollection: (collection: NFTCollection) => void;
+  setMetadata: (metadata: Partial<NFTMetadata>) => void;
+  setMintAmount: (amount: number) => void;
+}
+
+export const useNFTStore = create<NFTStore>((set) => ({
+  currentCollection: {
+    address: null,
+    name: '',
+    symbol: '',
+    description: '',
+    coverImage: '',
+  },
+  metadata: {
+    name: '',
+    description: '',
+    image: '',
+    attributes: [],
+  },
+  mintAmount: 1,
+  setCurrentCollection: (collection) => set({ currentCollection: collection }),
+  setMetadata: (metadata) => set((state) => ({ metadata: { ...state.metadata, ...metadata } })),
+  setMintAmount: (amount) => set({ mintAmount: amount }),
+}));
+```
+
+#### 2. IPFS上传工具
+
+```typescript
+// src/utils/ipfs.ts
+import axios from 'axios';
+
+// 安全提示：API密钥不应该直接暴露在前端代码中
+// 生产环境推荐：使用后端API作为代理，在后端处理IPFS上传
+const PINATA_API_KEY = process.env.NEXT_PUBLIC_PINATA_API_KEY;
+// 注意：移除了直接暴露的API密钥，改用更安全的方式（如后端代理）
+
+interface PinataResponse {
+  IpfsHash: string;
+  PinSize: number;
+  Timestamp: string;
+}
+
+// 上传图片到IPFS - 生产环境推荐使用后端代理
+export async function uploadImageToIPFS(file: File): Promise<string> {
+  try {
+    // 安全检查：文件类型验证
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+      throw new Error('不支持的文件类型，请上传JPEG、PNG、GIF或WEBP格式图片');
+    }
+    
+    // 安全检查：文件大小限制 (5MB)
+    const maxSize = 5 * 1024 * 1024; // 5MB
+    if (file.size > maxSize) {
+      throw new Error('文件大小超过限制，请上传小于5MB的图片');
+    }
+    
+    // 开发环境使用：直接调用Pinata API (仅用于演示)
+    // 生产环境应该使用后端API作为代理，避免暴露敏感密钥
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    // 生产环境推荐的后端API调用方式
+    // const res = await axios.post<{ ipfsUrl: string }>('/api/ipfs/upload-image', formData, {
+    //   headers: {
+    //     'Content-Type': 'multipart/form-data',
+    //   },
+    // });
+    // return res.data.ipfsUrl;
+    
+    // 仅用于演示的直接调用方式
+    if (process.env.NODE_ENV === 'development' && PINATA_API_KEY) {
+      // 注意：在实际开发中，这应该由后端处理，避免暴露API密钥
+      console.warn('开发环境警告：直接在前端调用IPFS API，生产环境请使用后端代理');
+      
+      // 这里应该从后端获取临时认证token，而不是直接使用密钥
+      // const authToken = await getAuthToken(); // 示例函数
+      
+      const res = await axios.post<PinataResponse>(
+        'https://api.pinata.cloud/pinning/pinFileToIPFS',
+        formData,
+        {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+            'pinata_api_key': PINATA_API_KEY,
+            // 注意：实际实现中应该使用更安全的认证方式
+            // 'Authorization': `Bearer ${authToken}`,
+          },
+        }
+      );
+      
+      return `ipfs://${res.data.IpfsHash}`;
+    } else {
+      throw new Error('请配置后端IPFS上传API以确保安全性');
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : '未知错误';
+    console.error('IPFS图片上传失败:', error);
+    throw new Error(`图片上传失败: ${errorMessage}`);
+  }
+}
+
+// 上传元数据到IPFS - 生产环境推荐使用后端代理
+export async function uploadMetadataToIPFS(metadata: any): Promise<string> {
+  try {
+    // 安全检查：元数据验证
+    if (!metadata || typeof metadata !== 'object') {
+      throw new Error('无效的元数据格式');
+    }
+    
+    // 验证必要字段
+    if (!metadata.name || !metadata.image) {
+      throw new Error('元数据必须包含name和image字段');
+    }
+    
+    // 生产环境推荐的后端API调用方式
+    // const res = await axios.post<{ ipfsUrl: string }>('/api/ipfs/upload-metadata', metadata);
+    // return res.data.ipfsUrl;
+    
+    // 仅用于演示的直接调用方式
+    if (process.env.NODE_ENV === 'development' && PINATA_API_KEY) {
+      // 注意：在实际开发中，这应该由后端处理，避免暴露API密钥
+      console.warn('开发环境警告：直接在前端调用IPFS API，生产环境请使用后端代理');
+      
+      const res = await axios.post<PinataResponse>(
+        'https://api.pinata.cloud/pinning/pinJSONToIPFS',
+        metadata,
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'pinata_api_key': PINATA_API_KEY,
+            // 注意：实际实现中应该使用更安全的认证方式
+          },
+        }
+      );
+      
+      return `ipfs://${res.data.IpfsHash}`;
+    } else {
+      throw new Error('请配置后端IPFS上传API以确保安全性');
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : '未知错误';
+    console.error('IPFS元数据上传失败:', error);
+    throw new Error(`元数据上传失败: ${errorMessage}`);
+  }
+}
+
+// 转换IPFS链接为可访问URL
+export function convertIPFStoURL(ipfsLink: string, gateway: string = 'https://gateway.pinata.cloud/ipfs/'): string {
+  if (ipfsLink.startsWith('ipfs://')) {
+    const ipfsHash = ipfsLink.replace('ipfs://', '');
+    return `${gateway}${ipfsHash}`;
+  }
+  return ipfsLink;
+}
+```
+
+#### 3. NFT铸造Hook
+
+```typescript
+// src/hooks/useNFT.ts
+import { useState } from 'react';
+import { useAccount, useWriteContract } from 'wagmi';
+import { useNFTStore } from '../store/nftStore';
+import { uploadImageToIPFS, uploadMetadataToIPFS } from '../utils/ipfs';
+import { ERC721MintableABI } from '../abis/ERC721Mintable';
+
+export function useNFT() {
+  const { address } = useAccount();
+  const { currentCollection, metadata, mintAmount } = useNFTStore();
+  const { writeContract } = useWriteContract();
+  
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+  
+  // 重置状态
+  const resetState = () => {
+    setIsLoading(false);
+    setError(null);
+    setSuccess(false);
+  };
+  
+  // 验证元数据
+  const validateMetadata = (): void => {
+    if (!metadata.name || metadata.name.trim() === '') {
+      throw new Error('请输入NFT名称');
+    }
+    if (!metadata.description || metadata.description.trim() === '') {
+      throw new Error('请输入NFT描述');
+    }
+    // 名称长度限制
+    if (metadata.name.length > 100) {
+      throw new Error('NFT名称不能超过100个字符');
+    }
+    // 描述长度限制
+    if (metadata.description.length > 1000) {
+      throw new Error('NFT描述不能超过1000个字符');
+    }
+  };
+  
+  // 上传图片并创建元数据
+  const prepareMetadata = async (file: File): Promise<string> => {
+    try {
+      // 验证元数据
+      validateMetadata();
+      
+      // 1. 上传图片到IPFS
+      const imageUrl = await uploadImageToIPFS(file);
+      
+      // 2. 创建完整的元数据
+      const fullMetadata = {
+        ...metadata,
+        image: imageUrl,
+        external_url: `https://yourdapp.com/nft/${currentCollection?.address}`,
+        // 添加铸造时间戳和铸造者信息
+        created_at: new Date().toISOString(),
+        creator: address,
+        collection_address: currentCollection?.address,
+      };
+      
+      // 3. 上传元数据到IPFS
+      const metadataUrl = await uploadMetadataToIPFS(fullMetadata);
+      
+      console.log('元数据准备成功:', { imageUrl, metadataUrl });
+      return metadataUrl;
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : '元数据准备失败';
+      setError(errorMessage);
+      console.error('Metadata preparation error:', err);
+      throw err;
+    }
+  };
+  
+  // 铸造单个NFT
+  const mintNFT = async (file: File) => {
+    if (!address) {
+      setError('请先连接钱包');
+      return;
+    }
+    
+    if (!currentCollection?.address) {
+      setError('请选择一个NFT集合');
+      return;
+    }
+    
+    try {
+      resetState();
+      setIsLoading(true);
+      
+      // 1. 准备元数据
+      const metadataUrl = await prepareMetadata(file);
+      
+      // 2. 调用合约铸造NFT
+      // 添加交易配置选项
+      const txConfig = {
+        // 可选：设置gas限制
+        // gas: BigInt(2000000),
+      };
+      
+      const result = await writeContract({
+        ...txConfig,
+        address: currentCollection.address,
+        abi: ERC721MintableABI,
+        functionName: 'mintNFT',
+        args: [address, metadataUrl],
+      });
+      
+      setSuccess(true);
+      console.log('NFT铸造成功:', result);
+      return result;
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'NFT铸造失败';
+      setError(`铸造失败: ${errorMessage}`);
+      console.error('NFT minting error:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  // 批量铸造NFT
+  const batchMintNFTs = async (files: File[]) => {
+    if (!address) {
+      setError('请先连接钱包');
+      return;
+    }
+    
+    if (!currentCollection?.address) {
+      setError('请选择一个NFT集合');
+      return;
+    }
+    
+    try {
+      resetState();
+      setIsLoading(true);
+      
+      // 安全验证：限制批量铸造数量
+      const MAX_BATCH_SIZE = 20;
+      if (!files || files.length === 0) {
+        throw new Error('请选择要铸造的图片');
+      }
+      if (files.length > MAX_BATCH_SIZE) {
+        throw new Error(`批量铸造数量不能超过${MAX_BATCH_SIZE}个`);
+      }
+      
+      // 分批处理以避免超时和性能问题
+      const BATCH_CHUNK_SIZE = 5;
+      const batches = [];
+      for (let i = 0; i < files.length; i += BATCH_CHUNK_SIZE) {
+        batches.push(files.slice(i, i + BATCH_CHUNK_SIZE));
+      }
+      
+      const allMetadataUrls = [];
+      
+      // 逐个批次处理
+      for (const batch of batches) {
+        const batchMetadataUrls = await Promise.all(
+          batch.map(async (file) => {
+            try {
+              return await prepareMetadata(file);
+            } catch (err) {
+              const errorMessage = err instanceof Error ? err.message : '单个NFT元数据准备失败';
+              console.error(`文件 ${file.name} 元数据准备失败:`, err);
+              throw new Error(`文件 ${file.name}: ${errorMessage}`);
+            }
+          })
+        );
+        allMetadataUrls.push(...batchMetadataUrls);
+      }
+      
+      // 添加交易配置选项
+      const txConfig = {
+        // 批量铸造可能需要更多gas
+        // gas: BigInt(10000000),
+      };
+      
+      // 调用合约批量铸造
+      // 注意：这里需要合约支持批量铸造功能
+      const result = await writeContract({
+        ...txConfig,
+        address: currentCollection.address,
+        abi: ERC721MintableABI,
+        functionName: 'batchMintNFTs',
+        args: [address, allMetadataUrls],
+      });
+      
+      setSuccess(true);
+      console.log(`成功批量铸造 ${allMetadataUrls.length} 个NFT:`, result);
+      return result;
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : '批量铸造失败';
+      setError(`批量铸造失败: ${errorMessage}`);
+      console.error('Batch minting error:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  return {
+    mintNFT,
+    batchMintNFTs,
+    isLoading,
+    error,
+    success,
+  };
+}
+```
+
+#### 4. NFT创建器组件
+
+```tsx
+// src/components/NFTCreator/index.tsx
+import React, { useState } from 'react';
+import { useNFTStore } from '../../store/nftStore';
+import { useNFT } from '../../hooks/useNFT';
+import { convertIPFStoURL } from '../../utils/ipfs';
+
+interface NFTCreatorProps {
+  className?: string;
+}
+
+export function NFTCreator({ className }: NFTCreatorProps) {
+  const {
+    metadata,
+    mintAmount,
+    setMetadata,
+    setMintAmount,
+  } = useNFTStore();
+  
+  const { mintNFT, batchMintNFTs, isLoading, error, success } = useNFT();
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [isBatchMode, setIsBatchMode] = useState(false);
+  const [attributes, setAttributes] = useState<Array<{ trait_type: string; value: string }>>([]);
+  const [newAttribute, setNewAttribute] = useState({ trait_type: '', value: '' });
+  
+  // 处理单文件上传
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setSelectedFile(e.target.files[0]);
+    }
+  };
+  
+  // 处理多文件上传
+  const handleFilesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      setSelectedFiles(Array.from(e.target.files));
+    }
+  };
+  
+  // 添加属性
+  const addAttribute = () => {
+    if (newAttribute.trait_type && newAttribute.value) {
+      setAttributes([...attributes, { ...newAttribute }]);
+      setNewAttribute({ trait_type: '', value: '' });
+      setMetadata({ attributes: [...attributes, { ...newAttribute }] });
+    }
+  };
+  
+  // 删除属性
+  const removeAttribute = (index: number) => {
+    const newAttributes = attributes.filter((_, i) => i !== index);
+    setAttributes(newAttributes);
+    setMetadata({ attributes: newAttributes });
+  };
+  
+  // 处理铸造
+  const handleMint = async () => {
+    if (isBatchMode) {
+      if (selectedFiles.length > 0) {
+        await batchMintNFTs(selectedFiles);
+      }
+    } else {
+      if (selectedFile) {
+        await mintNFT(selectedFile);
+      }
+    }
+  };
+  
+  return (
+    <div className={`bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 ${className}`}>
+      <h2 className="text-2xl font-bold mb-6 text-center text-gray-900 dark:text-white">
+        NFT创建器
+      </h2>
+      
+      {/* 模式切换 */}
+      <div className="mb-6 flex justify-center gap-4">
+        <button
+          onClick={() => setIsBatchMode(false)}
+          className={`px-4 py-2 rounded-full ${!isBatchMode ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300'}`}
+        >
+          单个铸造
+        </button>
+        <button
+          onClick={() => setIsBatchMode(true)}
+          className={`px-4 py-2 rounded-full ${isBatchMode ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300'}`}
+        >
+          批量铸造
+        </button>
+      </div>
+      
+      {/* 图片上传 */}
+      <div className="mb-6">
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+          {isBatchMode ? '上传多张图片' : '上传NFT图片'}
+        </label>
+        <input
+          type="file"
+          accept="image/*"
+          multiple={isBatchMode}
+          onChange={isBatchMode ? handleFilesChange : handleFileChange}
+          className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-50 dark:bg-gray-700"
+        />
+        {selectedFile && !isBatchMode && (
+          <div className="mt-4 flex justify-center">
+            <img
+              src={URL.createObjectURL(selectedFile)}
+              alt="NFT Preview"
+              className="max-h-64 rounded-lg shadow-md"
+            />
+          </div>
+        )}
+        {isBatchMode && selectedFiles.length > 0 && (
+          <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+            已选择 {selectedFiles.length} 个文件
+          </p>
+        )}
+      </div>
+      
+      {/* 基本信息 */}
+      {!isBatchMode && (
+        <div className="space-y-4 mb-6">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              NFT名称
+            </label>
+            <input
+              type="text"
+              value={metadata.name}
+              onChange={(e) => setMetadata({ name: e.target.value })}
+              placeholder="输入NFT名称"
+              className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white"
+            />
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              描述
+            </label>
+            <textarea
+              value={metadata.description}
+              onChange={(e) => setMetadata({ description: e.target.value })}
+              placeholder="描述您的NFT"
+              rows={4}
+              className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white"
+            />
+          </div>
+        </div>
+      )}
+      
+      {/* 属性设置 */}
+      {!isBatchMode && (
+        <div className="mb-6">
+          <h3 className="text-lg font-semibold mb-3 text-gray-900 dark:text-white">属性</h3>
+          
+          <div className="space-y-3">
+            {attributes.map((attr, index) => (
+              <div key={index} className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={attr.trait_type}
+                  readOnly
+                  className="flex-1 p-2 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-100 dark:bg-gray-600 text-gray-900 dark:text-white"
+                />
+                <input
+                  type="text"
+                  value={attr.value}
+                  readOnly
+                  className="flex-1 p-2 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-100 dark:bg-gray-600 text-gray-900 dark:text-white"
+                />
+                <button
+                  onClick={() => removeAttribute(index)}
+                  className="p-2 text-red-500 hover:text-red-700"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+          
+          <div className="flex gap-2 mt-3">
+            <input
+              type="text"
+              value={newAttribute.trait_type}
+              onChange={(e) => setNewAttribute({ ...newAttribute, trait_type: e.target.value })}
+              placeholder="属性类型"
+              className="flex-1 p-2 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white"
+            />
+            <input
+              type="text"
+              value={newAttribute.value}
+              onChange={(e) => setNewAttribute({ ...newAttribute, value: e.target.value })}
+              placeholder="属性值"
+              className="flex-1 p-2 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white"
+            />
+            <button
+              onClick={addAttribute}
+              className="p-2 bg-green-500 text-white rounded-md hover:bg-green-600"
+            >
+              +
+            </button>
+          </div>
+        </div>
+      )}
+      
+      {/* 铸造数量 */}
+      {isBatchMode && (
+        <div className="mb-6">
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            铸造数量: {mintAmount}
+          </label>
+          <input
+            type="range"
+            min="1"
+            max="20"
+            value={mintAmount}
+            onChange={(e) => setMintAmount(parseInt(e.target.value))}
+            className="w-full"
+          />
+        </div>
+      )}
+      
+      {/* 铸造按钮 */}
+      <button
+        onClick={handleMint}
+        disabled={isLoading || (!selectedFile && !isBatchMode) || (isBatchMode && selectedFiles.length === 0)}
+        className={`w-full py-3 px-6 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-md transition-colors ${isLoading ? 'opacity-70 cursor-not-allowed' : ''}`}
+      >
+        {isLoading ? '铸造中...' : isBatchMode ? '批量铸造' : '铸造NFT'}
+      </button>
+      
+      {/* 状态提示 */}
+      {error && (
+        <p className="mt-4 text-red-500 text-center">{error}</p>
+      )}
+      
+      {success && (
+        <p className="mt-4 text-green-500 text-center">NFT铸造成功！</p>
+      )}
+    </div>
+  );
+}
+```
+
+#### 5. 创建NFT页面
+
+```tsx
+// src/app/nft/create/page.tsx
+'use client';
+
+import { NFTCreator } from '../../../components/NFTCreator';
+import { CollectionSelector } from '../../../components/CollectionSelector';
+
+export default function CreateNFT() {
+  return (
+    <main className="container mx-auto px-4 py-8 max-w-5xl">
+      <h1 className="text-4xl font-bold text-center mb-10 text-gray-900 dark:text-white">
+        创建您的NFT
+      </h1>
+      
+      <div className="grid md:grid-cols-3 gap-8">
+        <div className="md:col-span-1">
+          <CollectionSelector />
+          <div className="mt-6 bg-blue-50 dark:bg-blue-900/30 p-4 rounded-lg border border-blue-200 dark:border-blue-700">
+            <h3 className="font-semibold text-blue-800 dark:text-blue-300 mb-2">铸造指南</h3>
+            <ul className="text-sm text-blue-700 dark:text-blue-400 space-y-2">
+              <li>1. 选择要铸造到的NFT集合</li>
+              <li>2. 上传您的NFT图片（推荐PNG/JPG格式）</li>
+              <li>3. 填写NFT的名称和描述</li>
+              <li>4. 添加NFT的属性（可选）</li>
+              <li>5. 点击铸造按钮完成创建</li>
+            </ul>
+          </div>
+        </div>
+        <div className="md:col-span-2">
+          <NFTCreator />
+        </div>
+      </div>
+    </main>
+  );
+}
+```
+
+### 部署与优化建议
+
+1. **IPFS优化**：
+   - 实现图片压缩处理
+   - 使用多个IPFS网关提高可用性
+   - 添加元数据缓存机制
+
+2. **用户体验优化**：
+   - 实现铸造进度实时反馈
+   - 添加NFT预览功能
+   - 支持拖拽上传图片
+   - 实现批量铸造的批量预览
+
+3. **安全考虑**：
+   - 限制文件大小和类型
+   - 实现上传速率限制
+   - 添加铸造交易的风险提示
+   - 防止元数据篡改
+
+## 项目三：DAO投票系统
+
+### 功能概述
+
+构建一个基础的DAO治理投票应用，包括：
+- 提案创建与管理
+- 投票功能（赞成/反对/弃权）
+- 投票权重计算
+- 投票结果统计与展示
+- 提案执行机制
+
+### 项目架构
+
+```
+src/
+├── app/
+│   ├── dao/
+│   │   ├── proposals/
+│   │   │   └── [id]/page.tsx  # 提案详情页
+│   │   ├── create/
+│   │   │   └── page.tsx     # 创建提案页
+│   │   └── page.tsx         # DAO首页
+├── components/
+│   ├── ProposalCard/        # 提案卡片组件
+│   ├── VoteForm/            # 投票表单组件
+│   ├── ProposalDetail/      # 提案详情组件
+│   └── ResultsChart/        # 投票结果图表
+├── hooks/
+│   ├── useProposal.ts       # 提案逻辑钩子
+│   └── useVoting.ts         # 投票逻辑钩子
+├── store/
+│   └── daoStore.ts          # DAO状态管理
+└── utils/
+    ├── voting.ts            # 投票相关工具函数
+    └── proposal.ts          # 提案相关工具函数
+```
+
+### 核心代码实现
+
+#### 1. DAO状态管理
+
+```typescript
+// src/store/daoStore.ts
+import { create } from 'zustand';
+import { Address } from 'viem';
+
+export type ProposalStatus = 'active' | 'pending' | 'closed' | 'executed';
+
+export interface Proposal {
+  id: bigint;
+  proposer: Address;
+  title: string;
+  description: string;
+  startTime: number;
+  endTime: number;
+  forVotes: bigint;
+  againstVotes: bigint;
+  abstainVotes: bigint;
+  executed: boolean;
+  status: ProposalStatus;
+  targets: Address[];
+  values: bigint[];
+  calldatas: string[];
+}
+
+interface DAOStore {
+  proposals: Proposal[];
+  currentProposal: Proposal | null;
+  filteredStatus: ProposalStatus | 'all';
+  setProposals: (proposals: Proposal[]) => void;
+  setCurrentProposal: (proposal: Proposal | null) => void;
+  setFilteredStatus: (status: ProposalStatus | 'all') => void;
+  addProposal: (proposal: Proposal) => void;
+  updateProposal: (proposalId: bigint, updates: Partial<Proposal>) => void;
+}
+
+export const useDAOStore = create<DAOStore>((set) => ({
+  proposals: [],
+  currentProposal: null,
+  filteredStatus: 'all',
+  setProposals: (proposals) => set({ proposals }),
+  setCurrentProposal: (proposal) => set({ currentProposal: proposal }),
+  setFilteredStatus: (status) => set({ filteredStatus: status }),
+  addProposal: (proposal) => set((state) => ({ proposals: [...state.proposals, proposal] })),
+  updateProposal: (proposalId, updates) => set((state) => ({
+    proposals: state.proposals.map(p => 
+      p.id === proposalId ? { ...p, ...updates } : p
+    ),
+    currentProposal: state.currentProposal?.id === proposalId 
+      ? { ...state.currentProposal, ...updates }
+      : state.currentProposal
+  })),
+}));
+```
+
+#### 2. 提案Hook
+
+```typescript
+// src/hooks/useProposal.ts
+import { useState, useEffect } from 'react';
+import { useAccount, useWriteContract, useReadContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useDAOStore } from '../store/daoStore';
+import { DAOGovernorABI } from '../abis/DAOGovernor';
+
+// DAO Governor合约地址
+const GOVERNOR_ADDRESS = process.env.NEXT_PUBLIC_GOVERNOR_ADDRESS as `0x${string}`;
+
+export function useProposal() {
+  const { address } = useAccount();
+  const { setProposals, addProposal, updateProposal } = useDAOStore();
+  const { writeContract } = useWriteContract();
+  
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  
+  // 验证Governor合约地址
+  if (!GOVERNOR_ADDRESS) {
+    console.error('DAO Governor合约地址未配置，请检查环境变量 NEXT_PUBLIC_GOVERNOR_ADDRESS');
+  }
+  
+  // 计算提案说明的哈希值（简化版本）
+  const calculateProposalHash = (title: string, description: string): string => {
+    // 实际实现中应该使用keccak256哈希函数
+    // 这里使用简化版本作为示例
+    const proposalDescription = `${title}\n\n${description}`;
+    // 在真实环境中应该使用ethers.utils.keccak256或viem的hashMessage等
+    return '0x' + Array(64).fill('0').join(''); // 示例哈希
+  };
+  
+  // 验证提案参数
+  const validateProposalParams = (title: string, description: string, targets: string[], values: string[], calldatas: string[]): void => {
+    if (!title || title.trim() === '') {
+      throw new Error('请输入提案标题');
+    }
+    if (!description || description.trim() === '') {
+      throw new Error('请输入提案描述');
+    }
+    if (targets.length === 0) {
+      throw new Error('请至少指定一个目标合约');
+    }
+    if (targets.length !== values.length || targets.length !== calldatas.length) {
+      throw new Error('targets、values和calldatas数组长度必须相同');
+    }
+    // 验证地址格式
+    const addressRegex = /^0x[a-fA-F0-9]{40}$/;
+    for (const target of targets) {
+      if (!addressRegex.test(target)) {
+        throw new Error(`无效的合约地址: ${target}`);
+      }
+    }
+    // 验证calldata格式
+    const calldataRegex = /^0x[a-fA-F0-9]*$/;
+    for (const calldata of calldatas) {
+      if (!calldataRegex.test(calldata)) {
+        throw new Error(`无效的calldata格式: ${calldata}`);
+      }
+    }
+  };
+  
+  // 获取提案列表
+  const fetchProposals = async () => {
+    try {
+      if (!GOVERNOR_ADDRESS) {
+        throw new Error('DAO Governor合约地址未配置');
+      }
+      
+      setIsLoading(true);
+      setError(null);
+      
+      // 这里应该调用合约获取提案列表
+      // 示例中使用模拟数据
+      const mockProposals = [
+        {
+          id: BigInt(1),
+          proposer: '0x1234567890123456789012345678901234567890',
+          title: '更新DAO协议费用',
+          description: '将协议费用从0.3%降低到0.25%',
+          startTime: Math.floor(Date.now() / 1000) - 86400, // 1天前
+          endTime: Math.floor(Date.now() / 1000) + 86400,   // 1天后
+          forVotes: BigInt(10000),
+          againstVotes: BigInt(2000),
+          abstainVotes: BigInt(500),
+          executed: false,
+          status: 'active' as const,
+          targets: [],
+          values: [],
+          calldatas: [],
+        },
+        {
+          id: BigInt(2),
+          proposer: '0x0987654321098765432109876543210987654321',
+          title: '添加新的流动性池',
+          description: '在Uniswap上添加ETH/USDC流动性池',
+          startTime: Math.floor(Date.now() / 1000) - 172800, // 2天前
+          endTime: Math.floor(Date.now() / 1000) - 86400,   // 1天前
+          forVotes: BigInt(8000),
+          againstVotes: BigInt(3000),
+          abstainVotes: BigInt(1000),
+          executed: true,
+          status: 'executed' as const,
+          targets: [],
+          values: [],
+          calldatas: [],
+        }
+      ];
+      
+      setProposals(mockProposals);
+      console.log('成功获取提案列表，共', mockProposals.length, '个提案');
+      return mockProposals;
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : '获取提案列表失败';
+      setError(errorMessage);
+      console.error('Fetch proposals error:', err);
+      return [];
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  // 创建新提案
+  const createProposal = async (
+    title: string,
+    description: string,
+    targets: string[],
+    values: string[],
+    calldatas: string[]
+  ) => {
+    if (!address) {
+      setError('请先连接钱包');
+      return null;
+    }
+    
+    if (!GOVERNOR_ADDRESS) {
+      const errorMsg = 'DAO Governor合约地址未配置，无法创建提案';
+      setError(errorMsg);
+      console.error(errorMsg);
+      return null;
+    }
+    
+    try {
+      setIsLoading(true);
+      setError(null);
+      
+      // 验证参数
+      validateProposalParams(title, description, targets, values, calldatas);
+      
+      // 交易配置选项
+      const txConfig = {
+        // 可选：设置gas限制
+        // gas: BigInt(3000000),
+      };
+      
+      // 调用合约创建提案
+      const result = await writeContract({
+        ...txConfig,
+        address: GOVERNOR_ADDRESS,
+        abi: DAOGovernorABI,
+        functionName: 'propose',
+        args: [
+          targets.map(t => t as `0x${string}`),
+          values.map(v => BigInt(v)),
+          calldatas,
+          `${title}\n\n${description}` // 提案说明
+        ],
+      });
+      
+      console.log('提案创建交易已提交:', result);
+      // 注意：实际应用中应该等待交易确认并获取新提案ID
+      return result;
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : '创建提案失败';
+      setError(`创建提案失败: ${errorMessage}`);
+      console.error('Create proposal error:', err);
+      return null;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  // 执行提案
+  const executeProposal = async (proposalId: bigint) => {
+    if (!address) {
+      setError('请先连接钱包');
+      return null;
+    }
+    
+    if (!GOVERNOR_ADDRESS) {
+      const errorMsg = 'DAO Governor合约地址未配置，无法执行提案';
+      setError(errorMsg);
+      console.error(errorMsg);
+      return null;
+    }
+    
+    try {
+      setIsLoading(true);
+      setError(null);
+      
+      // 获取提案详情
+      const proposal = useDAOStore.getState().proposals.find(p => p.id === proposalId);
+      if (!proposal) {
+        throw new Error('提案不存在');
+      }
+      
+      // 验证提案状态
+      if (proposal.executed) {
+        throw new Error('该提案已经被执行');
+      }
+      
+      if (proposal.status !== 'closed') {
+        throw new Error('提案尚未结束投票，无法执行');
+      }
+      
+      // 计算提案说明哈希
+      const descriptionHash = calculateProposalHash(proposal.title, proposal.description);
+      
+      // 交易配置选项
+      const txConfig = {
+        // 执行提案可能需要更多gas
+        // gas: BigInt(5000000),
+      };
+      
+      // 调用合约执行提案
+      const result = await writeContract({
+        ...txConfig,
+        address: GOVERNOR_ADDRESS,
+        abi: DAOGovernorABI,
+        functionName: 'execute',
+        args: [
+          proposal.targets.map(t => t as `0x${string}`),
+          proposal.values,
+          proposal.calldatas,
+          descriptionHash,
+        ],
+      });
+      
+      // 更新提案状态
+      updateProposal(proposalId, { executed: true, status: 'executed' });
+      console.log('提案执行交易已提交:', result);
+      
+      return result;
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : '执行提案失败';
+      setError(`执行提案失败: ${errorMessage}`);
+      console.error('Execute proposal error:', err);
+      return null;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  return {
+    fetchProposals,
+    createProposal,
+    executeProposal,
+    isLoading,
+    error,
+  };
+}
+```
+
+#### 3. 投票Hook
+
+```typescript
+// src/hooks/useVoting.ts
+import { useState } from 'react';
+import { useAccount, useWriteContract } from 'wagmi';
+import { useDAOStore } from '../store/daoStore';
+import { DAOGovernorABI } from '../abis/DAOGovernor';
+
+export type VoteType = 0 | 1 | 2; // 0: 反对, 1: 赞成, 2: 弃权
+
+// DAO Governor合约地址
+const GOVERNOR_ADDRESS = process.env.NEXT_PUBLIC_GOVERNOR_ADDRESS as `0x${string}`;
+
+export function useVoting(proposalId?: bigint) {
+  const { address } = useAccount();
+  const { updateProposal } = useDAOStore();
+  const { writeContract } = useWriteContract();
+  
+  const [isVoting, setIsVoting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  
+  // 验证Governor合约地址
+  if (!GOVERNOR_ADDRESS) {
+    console.error('DAO Governor合约地址未配置，请检查环境变量 NEXT_PUBLIC_GOVERNOR_ADDRESS');
+  }
+  
+  // 验证投票参数
+  const validateVoteParams = (voteType: VoteType, reason?: string): void => {
+    if (!proposalId) {
+      throw new Error('未指定提案ID');
+    }
+    
+    // 验证投票类型
+    if (![0, 1, 2].includes(voteType)) {
+      throw new Error('无效的投票类型');
+    }
+    
+    // 验证投票理由长度
+    if (reason && reason.length > 500) {
+      throw new Error('投票理由不能超过500个字符');
+    }
+  };
+  
+  // 验证提案投票状态
+  const validateProposalForVoting = (): void => {
+    if (!proposalId) {
+      throw new Error('未指定提案ID');
+    }
+    
+    const proposal = useDAOStore.getState().proposals.find(p => p.id === proposalId);
+    if (!proposal) {
+      throw new Error('提案不存在');
+    }
+    
+    const now = Math.floor(Date.now() / 1000);
+    
+    if (proposal.executed) {
+      throw new Error('该提案已经被执行，无法投票');
+    }
+    
+    if (now < proposal.startTime) {
+      throw new Error('提案投票尚未开始');
+    }
+    
+    if (now > proposal.endTime) {
+      throw new Error('提案投票已结束');
+    }
+  };
+  
+  // 投票
+  const castVote = async (voteType: VoteType, reason?: string) => {
+    if (!address) {
+      setError('请先连接钱包');
+      return null;
+    }
+    
+    if (!proposalId) {
+      setError('请先选择提案');
+      return null;
+    }
+    
+    if (!GOVERNOR_ADDRESS) {
+      const errorMsg = 'DAO Governor合约地址未配置，无法进行投票';
+      setError(errorMsg);
+      console.error(errorMsg);
+      return null;
+    }
+    
+    try {
+      setIsVoting(true);
+      setError(null);
+      
+      // 验证参数
+      validateVoteParams(voteType, reason);
+      
+      // 验证提案状态
+      validateProposalForVoting();
+      
+      // 交易配置选项
+      const txConfig = {
+        // 可选：设置gas限制
+        // gas: BigInt(500000),
+      };
+      
+      // 调用合约投票
+      const result = await writeContract({
+        ...txConfig,
+        address: GOVERNOR_ADDRESS,
+        abi: DAOGovernorABI,
+        functionName: reason ? 'castVoteWithReason' : 'castVote',
+        args: reason 
+          ? [proposalId, voteType, reason]
+          : [proposalId, voteType],
+      });
+      
+      console.log('投票交易已提交:', result);
+      
+      // 注意：实际应用中应该等待交易确认后，通过合约读取最新的投票数
+      // 这里仅作为前端临时状态更新示例
+      const proposal = useDAOStore.getState().proposals.find(p => p.id === proposalId);
+      if (proposal) {
+        // 注意：这里应该从合约获取实际投票权重，而不是硬编码值
+        // 在真实实现中，应该使用useReadContract读取用户的投票权重
+        const VOTE_WEIGHT = BigInt(100); // 示例权重
+        
+        switch (voteType) {
+          case 1: // 赞成
+            updateProposal(proposalId, { forVotes: proposal.forVotes + VOTE_WEIGHT });
+            break;
+          case 0: // 反对
+            updateProposal(proposalId, { againstVotes: proposal.againstVotes + VOTE_WEIGHT });
+            break;
+          case 2: // 弃权
+            updateProposal(proposalId, { abstainVotes: proposal.abstainVotes + VOTE_WEIGHT });
+            break;
+        }
+      }
+      
+      return result;
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : '投票失败';
+      setError(`投票失败: ${errorMessage}`);
+      console.error('Cast vote error:', err);
+      return null;
+    } finally {
+      setIsVoting(false);
+    }
+  };
+  
+  // 获取用户投票状态
+  const getUserVote = async (): Promise<VoteType | null> => {
+    if (!address || !proposalId || !GOVERNOR_ADDRESS) {
+      return null;
+    }
+    
+    try {
+      // 这里应该调用合约获取用户投票状态
+      // 例如：
+      // const voteType = await readContract({
+      //   address: GOVERNOR_ADDRESS,
+      //   abi: DAOGovernorABI,
+      //   functionName: 'getReceipt',
+      //   args: [proposalId, address]
+      // });
+      
+      // 示例中返回null
+      return null;
+    } catch (err) {
+      console.error('Get user vote error:', err);
+      return null;
+    }
+  };
+  
+  return {
+    castVote,
+    getUserVote,
+    isVoting,
+    error,
+  };
+}
+```
+
+#### 4. 提案卡片组件
+
+```tsx
+// src/components/ProposalCard/index.tsx
+import React from 'react';
+import { Link } from 'next/link';
+import { Proposal } from '../../store/daoStore';
+
+interface ProposalCardProps {
+  proposal: Proposal;
+  className?: string;
+}
+
+export function ProposalCard({ proposal, className }: ProposalCardProps) {
+  // 计算剩余时间
+  const getTimeRemaining = () => {
+    const now = Math.floor(Date.now() / 1000);
+    const remaining = proposal.endTime - now;
+    
+    if (remaining <= 0) return '已结束';
+    
+    const hours = Math.floor(remaining / 3600);
+    const minutes = Math.floor((remaining % 3600) / 60);
+    
+    if (hours > 24) {
+      const days = Math.floor(hours / 24);
+      return `${days} 天 ${hours % 24} 小时`;
+    }
+    
+    return `${hours} 小时 ${minutes} 分钟`;
+  };
+  
+  // 计算总投票数
+  const totalVotes = proposal.forVotes + proposal.againstVotes + proposal.abstainVotes;
+  
+  // 计算赞成票百分比
+  const forPercentage = totalVotes > 0 
+    ? Number(proposal.forVotes * BigInt(100) / totalVotes)
+    : 0;
+  
+  // 获取状态样式
+  const getStatusStyle = () => {
+    switch (proposal.status) {
+      case 'active':
+        return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300';
+      case 'pending':
+        return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300';
+      case 'closed':
+        return 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300';
+      case 'executed':
+        return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300';
+      default:
+        return '';
+    }
+  };
+  
+  return (
+    <Link
+      href={`/dao/proposals/${proposal.id}`}
+      className={`block bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow ${className}`}
+    >
+      <div className="p-6">
+        {/* 提案标题和状态 */}
+        <div className="flex justify-between items-start mb-4">
+          <h3 className="text-lg font-bold text-gray-900 dark:text-white line-clamp-2">
+            {proposal.title}
+          </h3>
+          <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getStatusStyle()}`}>
+            {proposal.status === 'active' && '投票中'}
+            {proposal.status === 'pending' && '待开始'}
+            {proposal.status === 'closed' && '已关闭'}
+            {proposal.status === 'executed' && '已执行'}
+          </span>
+        </div>
+        
+        {/* 提案描述 */}
+        <p className="text-gray-600 dark:text-gray-400 text-sm mb-4 line-clamp-2">
+          {proposal.description}
+        </p>
+        
+        {/* 投票信息 */}
+        <div className="space-y-3">
+          <div>
+            <div className="flex justify-between text-sm mb-1">
+              <span className="text-gray-700 dark:text-gray-300">赞成: {Number(proposal.forVotes).toLocaleString()}</span>
+              <span className="text-gray-700 dark:text-gray-300">{forPercentage.toFixed(1)}%</span>
+            </div>
+            <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+              <div 
+                className="bg-green-600 h-2 rounded-full"
+                style={{ width: `${forPercentage}%` }}
+              ></div>
+            </div>
+          </div>
+          
+          <div className="flex justify-between text-sm text-gray-500 dark:text-gray-500">
+            <span>反对: {Number(proposal.againstVotes).toLocaleString()}</span>
+            <span>弃权: {Number(proposal.abstainVotes).toLocaleString()}</span>
+          </div>
+        </div>
+        
+        {/* 剩余时间 */}
+        <div className="mt-4 text-sm text-gray-500 dark:text-gray-400">
+          {proposal.status === 'active' && (
+            <span>剩余时间: {getTimeRemaining()}</span>
+          )}
+          {proposal.status !== 'active' && (
+            <span>提案者: {proposal.proposer.slice(0, 6)}...{proposal.proposer.slice(-4)}</span>
+          )}
+        </div>
+      </div>
+    </Link>
+  );
+}
+```
+
+#### 5. DAO首页
+
+```tsx
+// src/app/dao/page.tsx
+'use client';
+
+import { useEffect } from 'react';
+import { ProposalCard, ProposalStatus } from '../../components/ProposalCard';
+import { useDAOStore } from '../../store/daoStore';
+import { useProposal } from '../../hooks/useProposal';
+import { ConnectButton } from '@rainbow-me/rainbowkit';
+
+export default function DAOPage() {
+  const { proposals, filteredStatus, setFilteredStatus } = useDAOStore();
+  const { fetchProposals, isLoading } = useProposal();
+  
+  // 初始加载提案
+  useEffect(() => {
+    fetchProposals();
+  }, []);
+  
+  // 过滤提案
+  const filteredProposals = filteredStatus === 'all'
+    ? proposals
+    : proposals.filter(p => p.status === filteredStatus);
+  
+  return (
+    <main className="container mx-auto px-4 py-8 max-w-5xl">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+        <h1 className="text-4xl font-bold text-gray-900 dark:text-white">
+          DAO治理中心
+        </h1>
+        <div className="flex gap-4">
+          <ConnectButton />
+          <a 
+            href="/dao/create" 
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-md transition-colors"
+          >
+            创建提案
+          </a>
+        </div>
+      </div>
+      
+      {/* 过滤标签 */}
+      <div className="flex flex-wrap gap-2 mb-8">
+        <button
+          onClick={() => setFilteredStatus('all')}
+          className={`px-4 py-2 rounded-full text-sm ${filteredStatus === 'all' 
+            ? 'bg-blue-600 text-white' 
+            : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300'}`}
+        >
+          全部
+        </button>
+        <button
+          onClick={() => setFilteredStatus('active')}
+          className={`px-4 py-2 rounded-full text-sm ${filteredStatus === 'active' 
+            ? 'bg-green-600 text-white' 
+            : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300'}`}
+        >
+          投票中
+        </button>
+        <button
+          onClick={() => setFilteredStatus('pending')}
+          className={`px-4 py-2 rounded-full text-sm ${filteredStatus === 'pending' 
+            ? 'bg-yellow-600 text-white' 
+            : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300'}`}
+        >
+          待开始
+        </button>
+        <button
+          onClick={() => setFilteredStatus('closed')}
+          className={`px-4 py-2 rounded-full text-sm ${filteredStatus === 'closed' 
+            ? 'bg-gray-600 text-white' 
+            : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300'}`}
+        >
+          已关闭
+        </button>
+        <button
+          onClick={() => setFilteredStatus('executed')}
+          className={`px-4 py-2 rounded-full text-sm ${filteredStatus === 'executed' 
+            ? 'bg-purple-600 text-white' 
+            : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300'}`}
+        >
+          已执行
+        </button>
+      </div>
+      
+      {/* 提案列表 */}
+      {isLoading ? (
+        <div className="flex justify-center items-center py-16">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-600"></div>
+        </div>
+      ) : filteredProposals.length === 0 ? (
+        <div className="text-center py-16 bg-white dark:bg-gray-800 rounded-lg shadow-md">
+          <p className="text-gray-600 dark:text-gray-400 text-lg">
+            暂无提案
+          </p>
+          <a 
+            href="/dao/create" 
+            className="mt-4 inline-block px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-md transition-colors"
+          >
+            创建第一个提案
+          </a>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-6">
+          {filteredProposals.map(proposal => (
+            <ProposalCard key={proposal.id} proposal={proposal} />
+          ))}
+        </div>
+      )}
+    </main>
+  );
+}
+```
+
+### 部署与优化建议
+
+1. **性能优化**：
+   - 实现提案数据的分页加载
+   - 添加提案缓存机制
+   - 优化投票结果实时更新
+
+2. **功能扩展**：
+   - 实现提案讨论区
+   - 添加投票委托功能
+   - 开发提案模板系统
+   - 支持提案批量操作
+
+3. **安全考虑**：
+   - 实施提案创建权限控制
+   - 添加投票权重验证
+   - 实现提案执行安全检查
+   - 防范投票操纵攻击
+
+## 通用部署配置
+
+### 1. 生产环境配置
+
+在 `next.config.js` 中添加生产环境配置：
+
+```javascript
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  reactStrictMode: true,
+  swcMinify: true,
+  webpack: (config) => {
+    // 解决Web3库的兼容性问题
+    config.resolve.fallback = {
+      ...config.resolve.fallback,
+      crypto: false,
+      stream: false,
+      path: false,
+    };
+    return config;
+  },
+  // 图像优化配置
+  images: {
+    domains: ['gateway.pinata.cloud', 'ipfs.io'],
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: '**',
+      },
+    ],
+  },
+};
+
+export default nextConfig;
+```
+
+### 2. 多环境配置
+
+创建环境配置文件：
+
+```bash
+# 开发环境
+.env.development
+
+# 测试环境
+.env.test
+
+# 生产环境
+.env.production
+```
+
+示例 `.env.production` 配置：
+
+```env
+# 基础配置
+NEXT_PUBLIC_PROJECT_ID=your_wallet_connect_project_id
+
+# 主网RPC端点
+NEXT_PUBLIC_ETHEREUM_RPC=https://mainnet.infura.io/v3/your_infura_key
+NEXT_PUBLIC_POLYGON_RPC=https://polygon-rpc.com
+
+# 合约地址
+NEXT_PUBLIC_UNISWAP_FACTORY=0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f
+NEXT_PUBLIC_UNISWAP_ROUTER=0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D
+NEXT_PUBLIC_GOVERNOR_ADDRESS=0xYourGovernorContractAddress
+
+# IPFS服务配置
+NEXT_PUBLIC_PINATA_API_KEY=your_pinata_api_key
+
+# 分析和监控
+NEXT_PUBLIC_SENTRY_DSN=your_sentry_dsn
+```
+
+### 3. CI/CD配置
+
+创建 `.github/workflows/deploy.yml` 用于自动化部署：
+
+```yaml
+name: Deploy Web3 Advanced Projects
+
+on:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_PROJECT_ID: ${{ secrets.NEXT_PUBLIC_PROJECT_ID }}
+          NEXT_PUBLIC_INFURA_KEY: ${{ secrets.NEXT_PUBLIC_INFURA_KEY }}
+          NEXT_PUBLIC_UNISWAP_FACTORY: ${{ secrets.NEXT_PUBLIC_UNISWAP_FACTORY }}
+          NEXT_PUBLIC_UNISWAP_ROUTER: ${{ secrets.NEXT_PUBLIC_UNISWAP_ROUTER }}
+          NEXT_PUBLIC_GOVERNOR_ADDRESS: ${{ secrets.NEXT_PUBLIC_GOVERNOR_ADDRESS }}
+
+      - name: Deploy to Vercel
+        uses: amondnet/vercel-action@v20
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          vercel-args: '--prod'
+```
+
+## 安全最佳实践
+
+### 1. 前端安全措施
+
+- **防止XSS攻击**
+  - 对所有用户输入进行验证和转义
+  - 使用React的JSX自动转义功能
+  - 实施内容安全策略(CSP)
+
+- **授权管理**
+  - 实施精确的代币授权额度
+  - 显示授权历史记录
+  - 提供撤销授权功能
+
+- **交易安全**
+  - 清晰显示交易参数和潜在风险
+  - 实施交易确认机制
+  - 添加交易时间锁和金额限制
+
+### 2. 智能合约交互安全
+
+- **Gas优化**
+  - 实施Gas价格估算和提示
+  - 支持Gas价格设置
+  - 处理Gas不足错误
+
+- **错误处理**
+  - 全面捕获和处理区块链交互错误
+  - 提供清晰的错误信息和恢复建议
+  - 实现交易重试机制
+
+- **防重放保护**
+  - 为交易添加唯一标识符
+  - 验证交易状态和历史
+
+## 性能优化技巧
+
+### 1. 代码分割与懒加载
+
+```javascript
+// 路由级别的代码分割
+import dynamic from 'next/dynamic';
+
+const HeavyComponent = dynamic(() => import('../components/HeavyComponent'), {
+  ssr: false,
+});
+```
+
+### 2. Web3数据缓存
+
+```typescript
+// 使用SWR缓存区块链数据
+import useSWR from 'swr';
+
+const fetcher = (url: string) => fetch(url).then(res => res.json());
+
+export function useTokenPrice(tokenAddress: string) {
+  const { data, error } = useSWR(
+    `https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`,
+    fetcher,
+    {
+      refreshInterval: 30000, // 30秒刷新一次
+    }
+  );
+  
+  return { price: data?.priceUsd, error };
+}
+```
+
+### 3. 资源优化
+
+- **图片优化**：使用Next.js的Image组件自动优化图片
+- **CSS优化**：使用TailwindCSS的JIT模式减少CSS体积
+- **字体优化**：使用字体子集和预加载
+
+```tsx
+// next.config.js 配置
+module.exports = {
+  images: {
+    domains: ['gateway.pinata.cloud', 'ipfs.io'],
+    formats: ['image/avif', 'image/webp'],
+    minimumCacheTTL: 60,
+  },
+};
+```
+
+## 项目扩展建议
+
+### 1. 多链支持
+
+实现对多个区块链网络的支持，如：
+- Ethereum
+- Polygon
+- Arbitrum
+- Optimism
+- BSC
+
+### 2. 高级功能
+
+- **Layer 2集成**：支持Polygon、Arbitrum等L2解决方案
+- **跨链功能**：实现跨链资产转移和交互
+- **社交恢复**：为钱包添加社交恢复功能
+- **Gasless交易**：集成元交易功能
+
+### 3. 用户体验提升
+
+- **深色模式**：实现完整的明暗主题切换
+- **响应式设计**：优化移动设备体验
+- **辅助功能**：支持键盘导航和屏幕阅读器
+- **多语言支持**：实现国际化(i18n)
+
+## 总结
+
+本文档详细介绍了如何使用最新的Web3技术栈构建三个进阶级项目：简易Swap应用、NFT铸造平台和DAO投票系统。这些项目涵盖了去中心化金融(DeFi)、非同质化代币(NFT)和去中心化自治组织(DAO)三大核心Web3应用场景。
+
+通过本指南，您学习了：
+
+1. **现代前端架构**：使用Next.js 16和React 19构建高性能Web应用
+2. **区块链交互**：使用Wagmi 2.0和Ethers 6实现与以太坊网络的无缝交互
+3. **钱包集成**：通过RainbowKit提供流畅的钱包连接体验
+4. **状态管理**：使用Zustand实现高效的状态管理
+5. **安全实践**：实施全面的安全防护措施和最佳实践
+
+这些项目不仅展示了Web3应用的核心功能，还强调了用户体验和安全性的重要性。通过遵循本指南的架构设计和代码实现，您可以构建出既安全又用户友好的Web3应用。
+
+在实际部署前，建议在测试网络上进行充分测试，并考虑实施本文档中提到的性能优化和安全措施，以确保应用的稳定性和安全性。
+
+祝您在Web3开发之旅中取得成功！

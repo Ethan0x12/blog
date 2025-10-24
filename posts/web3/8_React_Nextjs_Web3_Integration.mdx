@@ -1,0 +1,2367 @@
+---
+title: React+Next.js与Web3集成：构建现代化区块链应用
+publishedAt: 2025-10-16
+summary: 全面介绍React和Next.js框架与Web3技术栈的集成方案，包括自定义Hooks封装、SSR/SSG区块链数据处理、状态管理和UI组件库集成
+
+tags:
+  - web3
+  - react
+  - nextjs
+  - 区块链开发
+---
+
+# React+Next.js与Web3集成：构建现代化区块链应用
+
+在当今区块链开发领域，前端框架与Web3技术的无缝集成至关重要。React和Next.js作为最流行的前端技术栈，为构建高性能、用户友好的去中心化应用(DApps)提供了坚实基础。本文将深入探讨如何将React和Next.js与Web3技术栈完美结合，打造现代化的区块链应用。
+
+## 1. React Hooks与Web3：自定义Hook封装钱包逻辑
+
+自定义React Hooks是封装和复用Web3逻辑的理想方式，能够将复杂的区块链交互抽象为简洁的接口。
+
+### 1.1 钱包连接Hook
+
+```jsx
+// hooks/useWallet.js
+import { useState, useEffect } from 'react';
+import { ethers } from 'ethers';
+
+const useWallet = () => {
+  const [address, setAddress] = useState('');
+  const [isConnected, setIsConnected] = useState(false);
+  const [provider, setProvider] = useState(null);
+  const [signer, setSigner] = useState(null);
+  const [error, setError] = useState(null);
+  const [chainId, setChainId] = useState(null);
+  const [networkName, setNetworkName] = useState('');
+
+  // 连接钱包
+  const connectWallet = async () => {
+    try {
+      setError(null);
+      
+      // 检查window.ethereum是否存在
+      if (!window.ethereum) {
+        throw new Error('MetaMask或其他钱包未安装');
+      }
+
+      // 请求账户访问权限
+      const accounts = await window.ethereum.request({
+        method: 'eth_requestAccounts',
+      });
+
+      // 初始化provider和signer
+      const web3Provider = new ethers.providers.Web3Provider(window.ethereum);
+      setProvider(web3Provider);
+      setSigner(web3Provider.getSigner());
+      setAddress(accounts[0]);
+      setIsConnected(true);
+
+      // 获取链信息
+      const network = await web3Provider.getNetwork();
+      setChainId(network.chainId);
+      setNetworkName(network.name);
+    } catch (err) {
+      console.error('连接钱包失败:', err);
+      setError(err.message);
+    }
+  };
+
+  // 断开钱包
+  const disconnectWallet = () => {
+    setAddress('');
+    setIsConnected(false);
+    setProvider(null);
+    setSigner(null);
+    setChainId(null);
+    setNetworkName('');
+  };
+
+  // 监听账户变化
+  useEffect(() => {
+    if (!window.ethereum) return;
+
+    const handleAccountsChanged = (accounts) => {
+      if (accounts.length === 0) {
+        disconnectWallet();
+        setError('请连接钱包');
+      } else {
+        setAddress(accounts[0]);
+        setIsConnected(true);
+        setError(null);
+      }
+    };
+
+    // 监听链变化
+    const handleChainChanged = async (chainId) => {
+      setChainId(parseInt(chainId, 16));
+      
+      // 重新获取网络信息
+      if (provider) {
+        const network = await provider.getNetwork();
+        setNetworkName(network.name);
+      }
+    };
+
+    // 注册事件监听
+    window.ethereum.on('accountsChanged', handleAccountsChanged);
+    window.ethereum.on('chainChanged', handleChainChanged);
+
+    // 清理函数
+    return () => {
+      window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
+      window.ethereum.removeListener('chainChanged', handleChainChanged);
+    };
+  }, [provider]);
+
+  // 检查是否已连接钱包
+  useEffect(() => {
+    const checkIfConnected = async () => {
+      try {
+        if (!window.ethereum) return;
+
+        const accounts = await window.ethereum.request({
+          method: 'eth_accounts',
+        });
+
+        if (accounts.length > 0) {
+          const web3Provider = new ethers.providers.Web3Provider(window.ethereum);
+          setProvider(web3Provider);
+          setSigner(web3Provider.getSigner());
+          setAddress(accounts[0]);
+          setIsConnected(true);
+
+          // 获取链信息
+          const network = await web3Provider.getNetwork();
+          setChainId(network.chainId);
+          setNetworkName(network.name);
+        }
+      } catch (err) {
+        console.error('检查钱包连接状态失败:', err);
+      }
+    };
+
+    checkIfConnected();
+  }, []);
+
+  return {
+    address,
+    isConnected,
+    provider,
+    signer,
+    error,
+    chainId,
+    networkName,
+    connectWallet,
+    disconnectWallet,
+  };
+};
+
+export default useWallet;
+```
+
+### 1.2 智能合约交互Hook
+
+```jsx
+// hooks/useContract.js
+import { useMemo } from 'react';
+import { ethers } from 'ethers';
+import useWallet from './useWallet';
+
+const useContract = (contractAddress, contractABI) => {
+  const { provider, signer } = useWallet();
+
+  // 使用useMemo避免不必要的重新创建
+  const contract = useMemo(() => {
+    if (!contractAddress || !contractABI || !provider) {
+      return null;
+    }
+
+    // 创建合约实例
+    const contractInstance = new ethers.Contract(contractAddress, contractABI, provider);
+    
+    // 如果有signer，返回可写合约实例
+    if (signer) {
+      return contractInstance.connect(signer);
+    }
+    
+    // 否则返回只读合约实例
+    return contractInstance;
+  }, [contractAddress, contractABI, provider, signer]);
+
+  // 调用合约读取方法的辅助函数
+  const callMethod = async (methodName, ...args) => {
+    try {
+      if (!contract) {
+        throw new Error('合约未初始化');
+      }
+      
+      const result = await contract[methodName](...args);
+      return result;
+    } catch (error) {
+      console.error(`调用合约方法 ${methodName} 失败:`, error);
+      throw error;
+    }
+  };
+
+  // 调用合约写入方法的辅助函数
+  const sendMethod = async (methodName, overrides = {}, ...args) => {
+    try {
+      if (!contract || !signer) {
+        throw new Error('合约未初始化或未连接钱包');
+      }
+      
+      // 发送交易
+      const tx = await contract[methodName](...args, {
+        gasLimit: 3000000,
+        ...overrides,
+      });
+      
+      // 等待交易确认
+      const receipt = await tx.wait();
+      return receipt;
+    } catch (error) {
+      console.error(`发送交易 ${methodName} 失败:`, error);
+      throw error;
+    }
+  };
+
+  return {
+    contract,
+    callMethod,
+    sendMethod,
+  };
+};
+
+export default useContract;
+```
+
+### 1.3 余额查询Hook
+
+```jsx
+// hooks/useTokenBalance.js
+import { useState, useEffect } from 'react';
+import { ethers } from 'ethers';
+import useWallet from './useWallet';
+import ERC20ABI from '../abis/ERC20.json'; // 导入ERC20代币ABI
+
+const useTokenBalance = (tokenAddress, format = true) => {
+  const { address, provider } = useWallet();
+  const [balance, setBalance] = useState('0');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  // 获取代币余额
+  const fetchBalance = async () => {
+    if (!address || !provider || !tokenAddress) {
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      // 创建代币合约实例
+      const tokenContract = new ethers.Contract(tokenAddress, ERC20ABI, provider);
+      
+      // 获取代币余额
+      const rawBalance = await tokenContract.balanceOf(address);
+      
+      // 获取代币小数位
+      const decimals = await tokenContract.decimals();
+      
+      // 根据需要格式化余额
+      const formattedBalance = format 
+        ? ethers.utils.formatUnits(rawBalance, decimals)
+        : rawBalance.toString();
+      
+      setBalance(formattedBalance);
+    } catch (err) {
+      console.error('获取代币余额失败:', err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 当地址、提供者或代币地址变化时获取余额
+  useEffect(() => {
+    fetchBalance();
+  }, [address, provider, tokenAddress]);
+
+  return {
+    balance,
+    loading,
+    error,
+    refreshBalance: fetchBalance,
+  };
+};
+
+// 原生ETH余额查询Hook
+const useETHBalance = (format = true) => {
+  const { address, provider } = useWallet();
+  const [balance, setBalance] = useState('0');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  // 获取ETH余额
+  const fetchBalance = async () => {
+    if (!address || !provider) {
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      // 获取ETH余额
+      const rawBalance = await provider.getBalance(address);
+      
+      // 根据需要格式化余额
+      const formattedBalance = format
+        ? ethers.utils.formatEther(rawBalance)
+        : rawBalance.toString();
+      
+      setBalance(formattedBalance);
+    } catch (err) {
+      console.error('获取ETH余额失败:', err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 当地址或提供者变化时获取余额
+  useEffect(() => {
+    fetchBalance();
+  }, [address, provider]);
+
+  return {
+    balance,
+    loading,
+    error,
+    refreshBalance: fetchBalance,
+  };
+};
+
+export { useTokenBalance, useETHBalance };
+```
+
+## 2. Next.js SSR/SSG：服务端渲染与静态生成中的区块链数据处理
+
+Next.js的服务端渲染(SSR)和静态生成(SSG)功能可以优化区块链应用的性能和SEO。然而，由于区块链交互的特殊性，需要特殊处理。
+
+### 2.1 服务端区块链数据获取
+
+```jsx
+// pages/token-info/[address].js
+import { ethers } from 'ethers';
+import ERC20ABI from '../../abis/ERC20.json';
+import Layout from '../../components/Layout';
+import TokenDetails from '../../components/TokenDetails';
+
+// 配置RPC提供者
+const rpcProvider = new ethers.providers.JsonRpcProvider(
+  process.env.NEXT_PUBLIC_RPC_URL || 'https://mainnet.infura.io/v3/YOUR_INFURA_KEY'
+);
+
+export default function TokenInfo({ tokenInfo, error }) {
+  if (error) {
+    return (
+      <Layout>
+        <div className="p-6 max-w-4xl mx-auto">
+          <h1 className="text-2xl font-bold mb-4">出错了</h1>
+          <p className="text-red-500">{error}</p>
+        </div>
+      </Layout>
+    );
+  }
+
+  return (
+    <Layout>
+      <TokenDetails tokenInfo={tokenInfo} />
+    </Layout>
+  );
+}
+
+// SSR: 服务端获取数据
+export async function getServerSideProps({ params }) {
+  const { address } = params;
+
+  try {
+    // 验证地址格式
+    if (!ethers.utils.isAddress(address)) {
+      throw new Error('无效的合约地址');
+    }
+
+    // 创建合约实例
+    const contract = new ethers.Contract(address, ERC20ABI, rpcProvider);
+
+    // 获取代币信息 - 并行请求提高性能
+    const [name, symbol, decimals, totalSupply] = await Promise.all([
+      contract.name().catch(() => 'Unknown'),
+      contract.symbol().catch(() => 'UNK'),
+      contract.decimals().catch(() => 18),
+      contract.totalSupply().catch(() => ethers.constants.Zero),
+    ]);
+
+    // 格式化总供应量
+    const formattedTotalSupply = ethers.utils.formatUnits(totalSupply, decimals);
+
+    // 返回代币信息
+    return {
+      props: {
+        tokenInfo: {
+          address,
+          name,
+          symbol,
+          decimals,
+          totalSupply: formattedTotalSupply,
+        },
+        error: null,
+      },
+    };
+  } catch (error) {
+    console.error('获取代币信息失败:', error);
+    return {
+      props: {
+        tokenInfo: null,
+        error: error.message || '获取代币信息失败',
+      },
+    };
+  }
+}
+```
+
+### 2.2 静态生成优化
+
+对于不会频繁变化的数据，可以使用静态生成来提高性能：
+
+```jsx
+// pages/popular-tokens.js
+import { ethers } from 'ethers';
+import ERC20ABI from '../abis/ERC20.json';
+import Layout from '../components/Layout';
+import TokenList from '../components/TokenList';
+
+// 配置RPC提供者
+const rpcProvider = new ethers.providers.JsonRpcProvider(
+  process.env.NEXT_PUBLIC_RPC_URL || 'https://mainnet.infura.io/v3/YOUR_INFURA_KEY'
+);
+
+// 热门代币地址列表
+const POPULAR_TOKENS = [
+  '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
+  '0xdAC17F958D2ee523a2206206994597C13D831ec7', // USDT
+  '0x6B175474E89094C44Da98b954EedeAC495271d0F', // DAI
+  '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599', // WBTC
+  '0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984', // UNI
+];
+
+export default function PopularTokens({ tokens }) {
+  return (
+    <Layout>
+      <div className="p-6 max-w-4xl mx-auto">
+        <h1 className="text-2xl font-bold mb-6">热门代币</h1>
+        <TokenList tokens={tokens} />
+      </div>
+    </Layout>
+  );
+}
+
+// SSG: 静态生成数据
+export async function getStaticProps() {
+  try {
+    // 为每个代币获取信息
+    const tokenPromises = POPULAR_TOKENS.map(async (address) => {
+      try {
+        const contract = new ethers.Contract(address, ERC20ABI, rpcProvider);
+        
+        // 并行请求代币数据
+        const [name, symbol, decimals, totalSupply] = await Promise.all([
+          contract.name().catch(() => 'Unknown'),
+          contract.symbol().catch(() => 'UNK'),
+          contract.decimals().catch(() => 18),
+          contract.totalSupply().catch(() => ethers.constants.Zero),
+        ]);
+
+        return {
+          address,
+          name,
+          symbol,
+          decimals,
+          totalSupply: ethers.utils.formatUnits(totalSupply, decimals),
+        };
+      } catch (error) {
+        console.error(`获取代币 ${address} 信息失败:`, error);
+        return {
+          address,
+          name: 'Unknown',
+          symbol: 'UNK',
+          decimals: 18,
+          totalSupply: '0',
+          error: error.message,
+        };
+      }
+    });
+
+    // 等待所有请求完成
+    const tokens = await Promise.all(tokenPromises);
+
+    return {
+      props: { tokens },
+      // 每24小时重新生成一次静态页面
+      revalidate: 60 * 60 * 24,
+    };
+  } catch (error) {
+    console.error('获取热门代币信息失败:', error);
+    return {
+      props: { tokens: [] },
+      revalidate: 60, // 出错时1分钟后重试
+    };
+  }
+}
+```
+
+### 2.3 客户端与服务端数据同步
+
+对于需要实时更新的数据，可以结合服务端数据和客户端交互：
+
+```jsx
+// components/TokenPrice.js
+import { useState, useEffect } from 'react';
+import { ethers } from 'ethers';
+import useWallet from '../hooks/useWallet';
+
+const TokenPrice = ({ initialPrice, tokenAddress }) => {
+  const [price, setPrice] = useState(initialPrice);
+  const [loading, setLoading] = useState(false);
+  const { provider } = useWallet();
+  
+  // 从API获取最新价格
+  const fetchLatestPrice = async () => {
+    if (!tokenAddress) return;
+    
+    setLoading(true);
+    try {
+      // 这里应该调用价格预言机API或DEX合约获取价格
+      // 以下是简化示例
+      const response = await fetch(
+        `https://api.pricefeed.example/v1/price/${tokenAddress}`
+      );
+      const data = await response.json();
+      setPrice(data.price);
+    } catch (error) {
+      console.error('获取最新价格失败:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // 组件挂载后开始轮询价格更新
+  useEffect(() => {
+    // 初始获取一次最新价格
+    fetchLatestPrice();
+    
+    // 设置定时轮询（每30秒更新一次）
+    const interval = setInterval(() => {
+      fetchLatestPrice();
+    }, 30000);
+    
+    // 清理函数
+    return () => clearInterval(interval);
+  }, [tokenAddress]);
+  
+  return (
+    <div className="price-container">
+      <div className="price">${price}</div>
+      <button 
+        className="refresh-btn" 
+        onClick={fetchLatestPrice}
+        disabled={loading}
+      >
+        {loading ? '更新中...' : '刷新'}
+      </button>
+    </div>
+  );
+};
+
+export default TokenPrice;
+```
+
+```jsx
+// pages/token/[address].js
+import { ethers } from 'ethers';
+import Layout from '../../components/Layout';
+import TokenPrice from '../../components/TokenPrice';
+import TokenInfoCard from '../../components/TokenInfoCard';
+
+// 配置RPC提供者
+const rpcProvider = new ethers.providers.JsonRpcProvider(
+  process.env.NEXT_PUBLIC_RPC_URL || 'https://mainnet.infura.io/v3/YOUR_INFURA_KEY'
+);
+
+export default function TokenPage({ tokenData, initialPrice }) {
+  return (
+    <Layout>
+      <div className="p-6 max-w-4xl mx-auto">
+        <h1 className="text-2xl font-bold mb-4">{tokenData.name} ({tokenData.symbol})</h1>
+        
+        {/* 使用服务端提供的初始价格，在客户端组件中会自动更新 */}
+        <TokenPrice 
+          initialPrice={initialPrice} 
+          tokenAddress={tokenData.address} 
+        />
+        
+        <TokenInfoCard tokenData={tokenData} />
+      </div>
+    </Layout>
+  );
+}
+
+// 服务端获取初始数据
+export async function getServerSideProps({ params }) {
+  const { address } = params;
+  
+  try {
+    // 验证地址格式
+    if (!ethers.utils.isAddress(address)) {
+      throw new Error('无效的合约地址');
+    }
+    
+    // 并行获取代币数据和价格数据
+    const [tokenData, priceData] = await Promise.all([
+      // 获取代币基本信息（这里应该根据实际合约类型调用相应方法）
+      (async () => {
+        // 实际实现中应该调用相应的合约方法
+        return {
+          address,
+          name: '示例代币',
+          symbol: 'EXAMPLE',
+          // 其他代币数据...
+        };
+      })(),
+      
+      // 获取初始价格
+      fetch(`https://api.pricefeed.example/v1/price/${address}`)
+        .then(res => res.json())
+        .then(data => data.price)
+        .catch(() => '0.0'),
+    ]);
+    
+    return {
+      props: {
+        tokenData,
+        initialPrice: priceData,
+      },
+    };
+  } catch (error) {
+    console.error('获取代币数据失败:', error);
+    return {
+      props: {
+        tokenData: { address, name: 'Unknown', symbol: 'UNK' },
+        initialPrice: '0.0',
+      },
+    };
+  }
+}
+```
+
+## 3. 状态管理：Redux、Recoil、Zustand处理Web3状态
+
+Web3应用通常有复杂的状态需要管理，包括钱包连接状态、合约数据、交易历史等。
+
+### 3.1 Zustand：轻量级状态管理
+
+Zustand是一个简单易用的状态管理库，非常适合管理Web3应用的状态：
+
+```jsx
+// store/web3Store.js
+import create from 'zustand';
+import { ethers } from 'ethers';
+
+// 创建Web3状态存储
+const useWeb3Store = create((set, get) => ({
+  // 钱包状态
+  address: '',
+  isConnected: false,
+  provider: null,
+  signer: null,
+  chainId: null,
+  networkName: '',
+  error: null,
+  
+  // 连接钱包
+  connectWallet: async () => {
+    try {
+      set({ error: null });
+      
+      // 检查window.ethereum是否存在
+      if (!window.ethereum) {
+        throw new Error('MetaMask或其他钱包未安装');
+      }
+
+      // 请求账户访问权限
+      const accounts = await window.ethereum.request({
+        method: 'eth_requestAccounts',
+      });
+
+      // 初始化provider和signer
+      const web3Provider = new ethers.providers.Web3Provider(window.ethereum);
+      const signer = web3Provider.getSigner();
+      const network = await web3Provider.getNetwork();
+      
+      set({
+        address: accounts[0],
+        isConnected: true,
+        provider: web3Provider,
+        signer,
+        chainId: network.chainId,
+        networkName: network.name,
+      });
+      
+      // 设置事件监听器
+      get().setupEventListeners();
+      
+    } catch (err) {
+      console.error('连接钱包失败:', err);
+      set({ error: err.message });
+    }
+  },
+  
+  // 断开钱包
+  disconnectWallet: () => {
+    set({
+      address: '',
+      isConnected: false,
+      provider: null,
+      signer: null,
+      chainId: null,
+      networkName: '',
+      error: null,
+    });
+  },
+  
+  // 设置事件监听器
+  setupEventListeners: () => {
+    if (!window.ethereum) return;
+    
+    // 监听账户变化
+    window.ethereum.on('accountsChanged', (accounts) => {
+      if (accounts.length === 0) {
+        get().disconnectWallet();
+        set({ error: '请连接钱包' });
+      } else {
+        set({ 
+          address: accounts[0],
+          isConnected: true,
+          error: null 
+        });
+      }
+    });
+    
+    // 监听链变化
+    window.ethereum.on('chainChanged', async (chainId) => {
+      set({ chainId: parseInt(chainId, 16) });
+      
+      // 重新获取网络信息
+      if (get().provider) {
+        const network = await get().provider.getNetwork();
+        set({ networkName: network.name });
+      }
+    });
+  },
+  
+  // 初始化：检查连接状态
+  initialize: async () => {
+    try {
+      if (!window.ethereum) return;
+
+      const accounts = await window.ethereum.request({
+        method: 'eth_accounts',
+      });
+
+      if (accounts.length > 0) {
+        const web3Provider = new ethers.providers.Web3Provider(window.ethereum);
+        const signer = web3Provider.getSigner();
+        const network = await web3Provider.getNetwork();
+        
+        set({
+          address: accounts[0],
+          isConnected: true,
+          provider: web3Provider,
+          signer,
+          chainId: network.chainId,
+          networkName: network.name,
+        });
+        
+        get().setupEventListeners();
+      }
+    } catch (err) {
+      console.error('初始化Web3失败:', err);
+    }
+  },
+  
+  // 代币余额缓存
+  tokenBalances: {},
+  
+  // 获取代币余额
+  fetchTokenBalance: async (tokenAddress, forceRefresh = false) => {
+    const { address, provider, tokenBalances } = get();
+    
+    if (!address || !provider || !tokenAddress) {
+      return '0';
+    }
+    
+    // 如果有缓存且不强制刷新，返回缓存值
+    if (tokenBalances[tokenAddress] && !forceRefresh) {
+      return tokenBalances[tokenAddress];
+    }
+    
+    try {
+      // 这里应该导入ERC20 ABI并创建合约实例
+      // 简化示例：
+      // const tokenContract = new ethers.Contract(tokenAddress, ERC20ABI, provider);
+      // const balance = await tokenContract.balanceOf(address);
+      // const decimals = await tokenContract.decimals();
+      // const formattedBalance = ethers.utils.formatUnits(balance, decimals);
+      
+      // 模拟结果
+      const formattedBalance = '100.0';
+      
+      // 更新缓存
+      set(state => ({
+        tokenBalances: {
+          ...state.tokenBalances,
+          [tokenAddress]: formattedBalance
+        }
+      }));
+      
+      return formattedBalance;
+    } catch (err) {
+      console.error(`获取代币 ${tokenAddress} 余额失败:`, err);
+      return '0';
+    }
+  },
+  
+  // 交易历史
+  transactions: [],
+  
+  // 添加交易
+  addTransaction: (txData) => {
+    set(state => ({
+      transactions: [txData, ...state.transactions]
+    }));
+  },
+  
+  // 更新交易状态
+  updateTransaction: (txHash, status, receipt = null) => {
+    set(state => ({
+      transactions: state.transactions.map(tx => 
+        tx.hash === txHash 
+          ? { ...tx, status, receipt } 
+          : tx
+      )
+    }));
+  },
+}));
+
+export default useWeb3Store;
+```
+
+### 3.2 Redux：完整的状态管理解决方案
+
+对于更复杂的应用，可以使用Redux进行状态管理：
+
+```jsx
+// store/actions/web3Actions.js
+import { ethers } from 'ethers';
+
+// Action Types
+export const CONNECT_WALLET_REQUEST = 'CONNECT_WALLET_REQUEST';
+export const CONNECT_WALLET_SUCCESS = 'CONNECT_WALLET_SUCCESS';
+export const CONNECT_WALLET_FAILURE = 'CONNECT_WALLET_FAILURE';
+export const DISCONNECT_WALLET = 'DISCONNECT_WALLET';
+export const UPDATE_ACCOUNT = 'UPDATE_ACCOUNT';
+export const UPDATE_NETWORK = 'UPDATE_NETWORK';
+export const FETCH_TOKEN_BALANCE_REQUEST = 'FETCH_TOKEN_BALANCE_REQUEST';
+export const FETCH_TOKEN_BALANCE_SUCCESS = 'FETCH_TOKEN_BALANCE_SUCCESS';
+export const FETCH_TOKEN_BALANCE_FAILURE = 'FETCH_TOKEN_BALANCE_FAILURE';
+export const ADD_TRANSACTION = 'ADD_TRANSACTION';
+export const UPDATE_TRANSACTION = 'UPDATE_TRANSACTION';
+
+// Action Creators
+export const connectWalletRequest = () => ({ type: CONNECT_WALLET_REQUEST });
+export const connectWalletSuccess = (walletData) => ({ 
+  type: CONNECT_WALLET_SUCCESS, 
+  payload: walletData 
+});
+export const connectWalletFailure = (error) => ({ 
+  type: CONNECT_WALLET_FAILURE, 
+  payload: error 
+});
+export const disconnectWallet = () => ({ type: DISCONNECT_WALLET });
+export const updateAccount = (account) => ({ 
+  type: UPDATE_ACCOUNT, 
+  payload: account 
+});
+export const updateNetwork = (chainId, networkName) => ({ 
+  type: UPDATE_NETWORK, 
+  payload: { chainId, networkName } 
+});
+export const fetchTokenBalanceRequest = (tokenAddress) => ({ 
+  type: FETCH_TOKEN_BALANCE_REQUEST, 
+  payload: tokenAddress 
+});
+export const fetchTokenBalanceSuccess = (tokenAddress, balance) => ({ 
+  type: FETCH_TOKEN_BALANCE_SUCCESS, 
+  payload: { tokenAddress, balance } 
+});
+export const fetchTokenBalanceFailure = (tokenAddress, error) => ({ 
+  type: FETCH_TOKEN_BALANCE_FAILURE, 
+  payload: { tokenAddress, error } 
+});
+export const addTransaction = (transaction) => ({ 
+  type: ADD_TRANSACTION, 
+  payload: transaction 
+});
+export const updateTransaction = (txHash, status, receipt = null) => ({ 
+  type: UPDATE_TRANSACTION, 
+  payload: { txHash, status, receipt } 
+});
+
+// 异步Actions
+export const connectWallet = () => async (dispatch) => {
+  dispatch(connectWalletRequest());
+  
+  try {
+    // 检查window.ethereum是否存在
+    if (!window.ethereum) {
+      throw new Error('MetaMask或其他钱包未安装');
+    }
+
+    // 请求账户访问权限
+    const accounts = await window.ethereum.request({
+      method: 'eth_requestAccounts',
+    });
+
+    // 初始化provider和signer
+    const web3Provider = new ethers.providers.Web3Provider(window.ethereum);
+    const signer = web3Provider.getSigner();
+    const network = await web3Provider.getNetwork();
+    
+    // 设置事件监听器
+    setupEventListeners(dispatch);
+    
+    dispatch(connectWalletSuccess({
+      address: accounts[0],
+      provider: web3Provider,
+      signer,
+      chainId: network.chainId,
+      networkName: network.name,
+    }));
+  } catch (error) {
+    dispatch(connectWalletFailure(error.message));
+  }
+};
+
+// 设置事件监听器
+const setupEventListeners = (dispatch) => {
+  if (!window.ethereum) return;
+  
+  // 监听账户变化
+  window.ethereum.on('accountsChanged', (accounts) => {
+    if (accounts.length === 0) {
+      dispatch(disconnectWallet());
+      dispatch(connectWalletFailure('请连接钱包'));
+    } else {
+      dispatch(updateAccount(accounts[0]));
+    }
+  });
+  
+  // 监听链变化
+  window.ethereum.on('chainChanged', async (chainId) => {
+    const web3Provider = new ethers.providers.Web3Provider(window.ethereum);
+    const network = await web3Provider.getNetwork();
+    dispatch(updateNetwork(parseInt(chainId, 16), network.name));
+  });
+};
+
+// 初始化Web3连接
+export const initializeWeb3 = () => async (dispatch) => {
+  try {
+    if (!window.ethereum) return;
+
+    const accounts = await window.ethereum.request({
+      method: 'eth_accounts',
+    });
+
+    if (accounts.length > 0) {
+      const web3Provider = new ethers.providers.Web3Provider(window.ethereum);
+      const signer = web3Provider.getSigner();
+      const network = await web3Provider.getNetwork();
+      
+      // 设置事件监听器
+      setupEventListeners(dispatch);
+      
+      dispatch(connectWalletSuccess({
+        address: accounts[0],
+        provider: web3Provider,
+        signer,
+        chainId: network.chainId,
+        networkName: network.name,
+      }));
+    }
+  } catch (error) {
+    console.error('初始化Web3失败:', error);
+  }
+};
+
+// 获取代币余额
+export const fetchTokenBalance = (tokenAddress) => async (dispatch, getState) => {
+  const { web3: { address, provider } } = getState();
+  
+  if (!address || !provider || !tokenAddress) {
+    return;
+  }
+  
+  dispatch(fetchTokenBalanceRequest(tokenAddress));
+  
+  try {
+    // 这里应该导入ERC20 ABI并创建合约实例
+    // 简化示例：
+    // const tokenContract = new ethers.Contract(tokenAddress, ERC20ABI, provider);
+    // const balance = await tokenContract.balanceOf(address);
+    // const decimals = await tokenContract.decimals();
+    // const formattedBalance = ethers.utils.formatUnits(balance, decimals);
+    
+    // 模拟结果
+    const formattedBalance = '100.0';
+    
+    dispatch(fetchTokenBalanceSuccess(tokenAddress, formattedBalance));
+  } catch (error) {
+    dispatch(fetchTokenBalanceFailure(tokenAddress, error.message));
+  }
+};
+
+// 发送交易
+export const sendTransaction = (txData) => async (dispatch, getState) => {
+  const { web3: { signer } } = getState();
+  
+  if (!signer) {
+    throw new Error('未连接钱包或获取signer失败');
+  }
+  
+  try {
+    // 创建交易对象
+    const tx = {
+      to: txData.to,
+      value: txData.value ? ethers.utils.parseEther(txData.value) : 0,
+      data: txData.data || '0x',
+      gasLimit: 3000000,
+      ...(txData.gasPrice && { gasPrice: ethers.utils.parseUnits(txData.gasPrice, 'gwei') }),
+    };
+    
+    // 记录交易
+    const txObj = {
+      hash: null,
+      type: txData.type || 'custom',
+      to: txData.to,
+      value: txData.value || '0',
+      status: 'pending',
+      timestamp: Date.now(),
+    };
+    
+    // 发送交易
+    const transaction = await signer.sendTransaction(tx);
+    txObj.hash = transaction.hash;
+    
+    // 添加到交易历史
+    dispatch(addTransaction(txObj));
+    
+    // 等待交易确认
+    const receipt = await transaction.wait();
+    
+    // 更新交易状态
+    dispatch(updateTransaction(transaction.hash, 'confirmed', receipt));
+    
+    return transaction.hash;
+  } catch (error) {
+    // 更新交易状态为失败
+    if (txObj.hash) {
+      dispatch(updateTransaction(txObj.hash, 'failed'));
+    }
+    throw error;
+  }
+};
+```
+
+```jsx
+// store/reducers/web3Reducer.js
+import {
+  CONNECT_WALLET_REQUEST,
+  CONNECT_WALLET_SUCCESS,
+  CONNECT_WALLET_FAILURE,
+  DISCONNECT_WALLET,
+  UPDATE_ACCOUNT,
+  UPDATE_NETWORK,
+  FETCH_TOKEN_BALANCE_REQUEST,
+  FETCH_TOKEN_BALANCE_SUCCESS,
+  FETCH_TOKEN_BALANCE_FAILURE,
+  ADD_TRANSACTION,
+  UPDATE_TRANSACTION,
+} from '../actions/web3Actions';
+
+const initialState = {
+  // 钱包状态
+  isConnected: false,
+  isConnecting: false,
+  address: '',
+  provider: null,
+  signer: null,
+  chainId: null,
+  networkName: '',
+  error: null,
+  
+  // 代币余额
+  tokenBalances: {},
+  balanceLoading: {},
+  balanceErrors: {},
+  
+  // 交易历史
+  transactions: [],
+};
+
+const web3Reducer = (state = initialState, action) => {
+  switch (action.type) {
+    case CONNECT_WALLET_REQUEST:
+      return {
+        ...state,
+        isConnecting: true,
+        error: null,
+      };
+    
+    case CONNECT_WALLET_SUCCESS:
+      return {
+        ...state,
+        isConnected: true,
+        isConnecting: false,
+        address: action.payload.address,
+        provider: action.payload.provider,
+        signer: action.payload.signer,
+        chainId: action.payload.chainId,
+        networkName: action.payload.networkName,
+        error: null,
+      };
+    
+    case CONNECT_WALLET_FAILURE:
+      return {
+        ...state,
+        isConnected: false,
+        isConnecting: false,
+        error: action.payload,
+      };
+    
+    case DISCONNECT_WALLET:
+      return {
+        ...initialState,
+      };
+    
+    case UPDATE_ACCOUNT:
+      return {
+        ...state,
+        address: action.payload,
+      };
+    
+    case UPDATE_NETWORK:
+      return {
+        ...state,
+        chainId: action.payload.chainId,
+        networkName: action.payload.networkName,
+      };
+    
+    case FETCH_TOKEN_BALANCE_REQUEST:
+      return {
+        ...state,
+        balanceLoading: {
+          ...state.balanceLoading,
+          [action.payload]: true,
+        },
+        balanceErrors: {
+          ...state.balanceErrors,
+          [action.payload]: null,
+        },
+      };
+    
+    case FETCH_TOKEN_BALANCE_SUCCESS:
+      return {
+        ...state,
+        tokenBalances: {
+          ...state.tokenBalances,
+          [action.payload.tokenAddress]: action.payload.balance,
+        },
+        balanceLoading: {
+          ...state.balanceLoading,
+          [action.payload.tokenAddress]: false,
+        },
+      };
+    
+    case FETCH_TOKEN_BALANCE_FAILURE:
+      return {
+        ...state,
+        balanceLoading: {
+          ...state.balanceLoading,
+          [action.payload.tokenAddress]: false,
+        },
+        balanceErrors: {
+          ...state.balanceErrors,
+          [action.payload.tokenAddress]: action.payload.error,
+        },
+      };
+    
+    case ADD_TRANSACTION:
+      return {
+        ...state,
+        transactions: [action.payload, ...state.transactions],
+      };
+    
+    case UPDATE_TRANSACTION:
+      return {
+        ...state,
+        transactions: state.transactions.map(tx =>
+          tx.hash === action.payload.txHash
+            ? { ...tx, status: action.payload.status, receipt: action.payload.receipt }
+            : tx
+        ),
+      };
+    
+    default:
+      return state;
+  }
+};
+
+export default web3Reducer;
+```
+
+### 3.3 Recoil：React状态管理库
+
+Recoil是Facebook开发的React状态管理库，专为React设计：
+
+```jsx
+// store/recoil/atoms.js
+import { atom } from 'recoil';
+
+// 钱包连接状态
+export const walletState = atom({
+  key: 'walletState',
+  default: {
+    isConnected: false,
+    address: '',
+    provider: null,
+    signer: null,
+    chainId: null,
+    networkName: '',
+    error: null,
+  },
+});
+
+// 加载状态
+export const isLoadingState = atom({
+  key: 'isLoadingState',
+  default: false,
+});
+
+// 代币余额状态 (地址 -> 余额)
+export const tokenBalancesState = atom({
+  key: 'tokenBalancesState',
+  default: {},
+});
+
+// 交易历史状态
+export const transactionsState = atom({
+  key: 'transactionsState',
+  default: [],
+});
+
+// 当前选中的网络
+export const selectedNetworkState = atom({
+  key: 'selectedNetworkState',
+  default: {
+    chainId: 1,
+    name: 'Ethereum Mainnet',
+    rpcUrl: 'https://mainnet.infura.io/v3/YOUR_INFURA_KEY',
+  },
+});
+```
+
+```jsx
+// store/recoil/selectors.js
+import { selector } from 'recoil';
+import { walletState, tokenBalancesState, transactionsState } from './atoms';
+
+// 获取格式化的地址
+export const formattedAddressState = selector({
+  key: 'formattedAddressState',
+  get: ({ get }) => {
+    const { address } = get(walletState);
+    if (!address) return '';
+    
+    // 格式化为 0x1234...abcd 格式
+    return `${address.slice(0, 6)}...${address.slice(-4)}`;
+  },
+});
+
+// 获取待处理交易数量
+export const pendingTransactionsCountState = selector({
+  key: 'pendingTransactionsCountState',
+  get: ({ get }) => {
+    const transactions = get(transactionsState);
+    return transactions.filter(tx => tx.status === 'pending').length;
+  },
+});
+
+// 获取特定代币的余额
+export const tokenBalanceSelector = (tokenAddress) => selector({
+  key: `tokenBalanceSelector_${tokenAddress}`,
+  get: ({ get }) => {
+    const balances = get(tokenBalancesState);
+    return balances[tokenAddress] || '0';
+  },
+});
+```
+
+```jsx
+// hooks/useRecoilWeb3.js
+import { useSetRecoilState, useRecoilValue, useCallback } from 'recoil';
+import { ethers } from 'ethers';
+import { walletState, tokenBalancesState, transactionsState, isLoadingState } from '../store/recoil/atoms';
+
+const useRecoilWeb3 = () => {
+  const setWalletState = useSetRecoilState(walletState);
+  const setTokenBalancesState = useSetRecoilState(tokenBalancesState);
+  const setTransactionsState = useSetRecoilState(transactionsState);
+  const setIsLoadingState = useSetRecoilState(isLoadingState);
+  
+  const wallet = useRecoilValue(walletState);
+  const tokenBalances = useRecoilValue(tokenBalancesState);
+  const transactions = useRecoilValue(transactionsState);
+  const isLoading = useRecoilValue(isLoadingState);
+  
+  // 连接钱包
+  const connectWallet = useCallback(async () => {
+    try {
+      setIsLoadingState(true);
+      setWalletState(prev => ({ ...prev, error: null }));
+      
+      if (!window.ethereum) {
+        throw new Error('MetaMask或其他钱包未安装');
+      }
+      
+      const accounts = await window.ethereum.request({
+        method: 'eth_requestAccounts',
+      });
+      
+      const web3Provider = new ethers.providers.Web3Provider(window.ethereum);
+      const signer = web3Provider.getSigner();
+      const network = await web3Provider.getNetwork();
+      
+      setWalletState({
+        isConnected: true,
+        address: accounts[0],
+        provider: web3Provider,
+        signer,
+        chainId: network.chainId,
+        networkName: network.name,
+        error: null,
+      });
+      
+      // 设置事件监听
+      setupEventListeners(setWalletState);
+      
+    } catch (error) {
+      console.error('连接钱包失败:', error);
+      setWalletState(prev => ({
+        ...prev,
+        error: error.message,
+      }));
+    } finally {
+      setIsLoadingState(false);
+    }
+  }, [setWalletState, setIsLoadingState]);
+  
+  // 断开钱包
+  const disconnectWallet = useCallback(() => {
+    setWalletState({
+      isConnected: false,
+      address: '',
+      provider: null,
+      signer: null,
+      chainId: null,
+      networkName: '',
+      error: null,
+    });
+  }, [setWalletState]);
+  
+  // 获取代币余额
+  const fetchTokenBalance = useCallback(async (tokenAddress) => {
+    if (!wallet.isConnected || !wallet.provider) return;
+    
+    try {
+      // 这里应该导入ERC20 ABI并创建合约实例
+      // 简化示例：
+      // const tokenContract = new ethers.Contract(tokenAddress, ERC20ABI, wallet.provider);
+      // const balance = await tokenContract.balanceOf(wallet.address);
+      // const decimals = await tokenContract.decimals();
+      // const formattedBalance = ethers.utils.formatUnits(balance, decimals);
+      
+      // 模拟结果
+      const formattedBalance = '100.0';
+      
+      setTokenBalancesState(prev => ({
+        ...prev,
+        [tokenAddress]: formattedBalance,
+      }));
+      
+      return formattedBalance;
+    } catch (error) {
+      console.error(`获取代币 ${tokenAddress} 余额失败:`, error);
+      return '0';
+    }
+  }, [wallet, setTokenBalancesState]);
+  
+  // 添加交易
+  const addTransaction = useCallback((transaction) => {
+    setTransactionsState(prev => [transaction, ...prev]);
+  }, [setTransactionsState]);
+  
+  // 更新交易状态
+  const updateTransaction = useCallback((txHash, status, receipt = null) => {
+    setTransactionsState(prev =>
+      prev.map(tx =>
+        tx.hash === txHash
+          ? { ...tx, status, receipt }
+          : tx
+      )
+    );
+  }, [setTransactionsState]);
+  
+  // 初始化Web3
+  const initializeWeb3 = useCallback(async () => {
+    try {
+      if (!window.ethereum) return;
+      
+      const accounts = await window.ethereum.request({
+        method: 'eth_accounts',
+      });
+      
+      if (accounts.length > 0) {
+        const web3Provider = new ethers.providers.Web3Provider(window.ethereum);
+        const signer = web3Provider.getSigner();
+        const network = await web3Provider.getNetwork();
+        
+        setWalletState({
+          isConnected: true,
+          address: accounts[0],
+          provider: web3Provider,
+          signer,
+          chainId: network.chainId,
+          networkName: network.name,
+          error: null,
+        });
+        
+        setupEventListeners(setWalletState);
+      }
+    } catch (error) {
+      console.error('初始化Web3失败:', error);
+    }
+  }, [setWalletState]);
+  
+  return {
+    wallet,
+    tokenBalances,
+    transactions,
+    isLoading,
+    connectWallet,
+    disconnectWallet,
+    fetchTokenBalance,
+    addTransaction,
+    updateTransaction,
+    initializeWeb3,
+  };
+};
+
+// 设置事件监听器
+const setupEventListeners = (setWalletState) => {
+  if (!window.ethereum) return;
+  
+  window.ethereum.on('accountsChanged', (accounts) => {
+    if (accounts.length === 0) {
+      setWalletState({
+        isConnected: false,
+        address: '',
+        provider: null,
+        signer: null,
+        chainId: null,
+        networkName: '',
+        error: '请连接钱包',
+      });
+    } else {
+      setWalletState(prev => ({
+        ...prev,
+        address: accounts[0],
+      }));
+    }
+  });
+  
+  window.ethereum.on('chainChanged', async (chainId) => {
+    const web3Provider = new ethers.providers.Web3Provider(window.ethereum);
+    const network = await web3Provider.getNetwork();
+    setWalletState(prev => ({
+      ...prev,
+      chainId: parseInt(chainId, 16),
+      networkName: network.name,
+    }));
+  });
+};
+
+export default useRecoilWeb3;
+```
+
+## 4. 组件库：与TailwindCSS、Chakra UI等CSS框架集成
+
+现代CSS框架可以大幅提高Web3应用的UI开发效率，以下是与主流框架的集成方案。
+
+### 4.1 与TailwindCSS集成
+
+TailwindCSS是一个实用优先的CSS框架，非常适合构建响应式的Web3应用界面：
+
+```jsx
+// components/WalletConnectButton.js
+import React from 'react';
+import useWallet from '../hooks/useWallet';
+
+const WalletConnectButton = () => {
+  const { address, isConnected, connectWallet, disconnectWallet, loading } = useWallet();
+  
+  // 格式化地址显示
+  const formatAddress = (addr) => {
+    if (!addr || addr.length < 10) return addr;
+    return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+  };
+  
+  return (
+    <div className="flex flex-col items-center">
+      {isConnected ? (
+        <div className="flex flex-col items-center">
+          <div className="bg-emerald-50 px-4 py-2 rounded-full border border-emerald-200 mb-2">
+            <span className="text-emerald-600 font-medium">{formatAddress(address)}</span>
+          </div>
+          <button
+            onClick={disconnectWallet}
+            className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-md transition-colors"
+          >
+            断开钱包
+          </button>
+        </div>
+      ) : (
+        <button
+          onClick={connectWallet}
+          disabled={loading}
+          className={`px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md font-medium transition-colors flex items-center ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+        >
+          {loading ? (
+            <span className="flex items-center">
+              <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              连接中...
+            </span>
+          ) : (
+            <span className="flex items-center">
+              <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+              连接钱包
+            </span>
+          )}
+        </button>
+      )}
+    </div>
+  );
+};
+
+export default WalletConnectButton;
+```
+
+```jsx
+// components/TokenCard.js
+import React from 'react';
+import { formatEther } from 'ethers/lib/utils';
+
+const TokenCard = ({ token, balance, isLoading }) => {
+  const { name, symbol, logoUrl } = token;
+  
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-md overflow-hidden border border-gray-100 dark:border-gray-700 transition-all hover:shadow-lg">
+      <div className="p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center">
+            {logoUrl ? (
+              <div className="w-12 h-12 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center mr-4">
+                <img src={logoUrl} alt={`${name} logo`} className="w-8 h-8 object-contain" />
+              </div>
+            ) : (
+              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center mr-4">
+                <span className="text-white font-bold text-lg">{symbol.substring(0, 2)}</span>
+              </div>
+            )}
+            <div>
+              <h3 className="font-bold text-xl text-gray-800 dark:text-white">{name}</h3>
+              <p className="text-gray-500 dark:text-gray-400">{symbol}</p>
+            </div>
+          </div>
+          <div className="text-right">
+            {isLoading ? (
+              <div className="w-24 h-6 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
+            ) : (
+              <p className="font-semibold text-gray-800 dark:text-white text-lg">{balance}</p>
+            )}
+          </div>
+        </div>
+        <div className="flex justify-end">
+          <button className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-md text-sm font-medium hover:bg-indigo-100 transition-colors">
+            查看详情
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default TokenCard;
+```
+
+### 4.2 与Chakra UI集成
+
+Chakra UI是一个功能强大、可访问的组件库，为Web3应用提供了优秀的UI基础：
+
+```jsx
+// components/TransactionHistory.js
+import React from 'react';
+import {
+  Box,
+  Table,
+  Thead,
+  Tbody,
+  Tr,
+  Th,
+  Td,
+  Badge,
+  Link,
+  Tooltip,
+} from '@chakra-ui/react';
+import { format } from 'date-fns';
+
+const TransactionHistory = ({ transactions }) => {
+  // 格式化交易时间
+  const formatTime = (timestamp) => {
+    return format(new Date(timestamp), 'yyyy-MM-dd HH:mm:ss');
+  };
+  
+  // 格式化地址
+  const formatAddress = (address) => {
+    if (!address || address.length < 10) return address;
+    return `${address.slice(0, 6)}...${address.slice(-4)}`;
+  };
+  
+  // 获取状态标签颜色
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'confirmed':
+        return 'bg-green-100 text-green-800';
+      case 'pending':
+        return 'bg-yellow-100 text-yellow-800';
+      case 'failed':
+        return 'bg-red-100 text-red-800';
+      default:
+        return 'bg-gray-100 text-gray-800';
+    }
+  };
+  
+  return (
+    <Box overflowX="auto">
+      <Table variant="simple">
+        <Thead>
+          <Tr>
+            <Th>交易哈希</Th>
+            <Th>类型</Th>
+            <Th>接收地址</Th>
+            <Th>金额</Th>
+            <Th>时间</Th>
+            <Th>状态</Th>
+          </Tr>
+        </Thead>
+        <Tbody>
+          {transactions.length === 0 ? (
+            <Tr>
+              <Td colSpan={6} className="text-center py-8">
+                暂无交易记录
+              </Td>
+            </Tr>
+          ) : (
+            transactions.map((tx) => (
+              <Tr key={tx.hash}>
+                <Td maxW="150px">
+                  <Tooltip label={tx.hash} placement="top">
+                    <Link 
+                      href={`https://etherscan.io/tx/${tx.hash}`} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="truncate hover:text-indigo-600"
+                    >
+                      {formatAddress(tx.hash)}
+                    </Link>
+                  </Tooltip>
+                </Td>
+                <Td>
+                  <Badge variant="outline" colorScheme="blue">
+                    {tx.type}
+                  </Badge>
+                </Td>
+                <Td maxW="150px">
+                  <Tooltip label={tx.to} placement="top">
+                    <span className="truncate">{formatAddress(tx.to)}</span>
+                  </Tooltip>
+                </Td>
+                <Td>{tx.value} ETH</Td>
+                <Td>{formatTime(tx.timestamp)}</Td>
+                <Td>
+                  <Badge className={getStatusColor(tx.status)}>
+                    {tx.status === 'confirmed' ? '已确认' : 
+                     tx.status === 'pending' ? '处理中' : '失败'}
+                  </Badge>
+                </Td>
+              </Tr>
+            ))
+          )}
+        </Tbody>
+      </Table>
+    </Box>
+  );
+};
+
+export default TransactionHistory;
+```
+
+```jsx
+// components/Web3Modal.js
+import React, { useState } from 'react';
+import {
+  Modal,
+  ModalOverlay,
+  ModalContent,
+  ModalHeader,
+  ModalCloseButton,
+  ModalBody,
+  ModalFooter,
+  Button,
+  VStack,
+  Image,
+  Text,
+  HStack,
+  Divider,
+} from '@chakra-ui/react';
+
+const walletOptions = [
+  {
+    id: 'metamask',
+    name: 'MetaMask',
+    logoUrl: '/metamask-logo.png',
+    description: '使用MetaMask连接',
+  },
+  {
+    id: 'walletconnect',
+    name: 'WalletConnect',
+    logoUrl: '/walletconnect-logo.png',
+    description: '使用WalletConnect连接',
+  },
+  {
+    id: 'coinbase',
+    name: 'Coinbase Wallet',
+    logoUrl: '/coinbase-logo.png',
+    description: '使用Coinbase Wallet连接',
+  },
+];
+
+const Web3Modal = ({ isOpen, onClose, onConnectWallet }) => {
+  const [selectedWallet, setSelectedWallet] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleSelectWallet = (wallet) => {
+    setSelectedWallet(wallet);
+  };
+
+  const handleConnect = async () => {
+    if (!selectedWallet) return;
+
+    setIsLoading(true);
+    try {
+      await onConnectWallet(selectedWallet.id);
+      onClose();
+    } catch (error) {
+      console.error('连接钱包失败:', error);
+      // 可以在这里显示错误信息
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} isCentered>
+      <ModalOverlay />
+      <ModalContent maxW="425px">
+        <ModalHeader textAlign="center">连接钱包</ModalHeader>
+        <ModalCloseButton />
+        <ModalBody>
+          <Text textAlign="center" mb={6}>请选择您的钱包提供商</Text>
+          
+          <VStack spacing={4} align="stretch">
+            {walletOptions.map((wallet) => (
+              <Button
+                key={wallet.id}
+                variant={selectedWallet?.id === wallet.id ? "solid" : "outline"}
+                colorScheme="blue"
+                onClick={() => handleSelectWallet(wallet)}
+                className={`justify-start text-left ${selectedWallet?.id === wallet.id ? 'bg-blue-50 text-blue-600 border-blue-200' : 'border-gray-200 text-gray-700'}`}
+                py={4}
+              >
+                <HStack w="100%">
+                  <Image
+                    src={wallet.logoUrl}
+                    alt={`${wallet.name} logo`}
+                    w={8}
+                    h={8}
+                  />
+                  <VStack align="start" spacing={0} ml={4}>
+                    <Text fontWeight="bold">{wallet.name}</Text>
+                    <Text fontSize="sm" color="gray.500">{wallet.description}</Text>
+                  </VStack>
+                </HStack>
+              </Button>
+            ))}
+          </VStack>
+          
+          <Divider my={6} />
+          
+          <Text fontSize="sm" textAlign="center" color="gray.500">
+            连接钱包即表示您同意我们的条款和条件
+          </Text>
+        </ModalBody>
+        
+        <ModalFooter>
+          <Button
+            onClick={handleConnect}
+            colorScheme="blue"
+            disabled={!selectedWallet || isLoading}
+            isLoading={isLoading}
+            w="100%"
+          >
+            连接钱包
+          </Button>
+        </ModalFooter>
+      </ModalContent>
+    </Modal>
+  );
+};
+
+export default Web3Modal;
+```
+
+### 4.3 与Ant Design集成
+
+Ant Design是一个企业级UI组件库，提供了丰富的组件用于构建Web3应用界面：
+
+```jsx
+// components/TokenTransferForm.js
+import React, { useState } from 'react';
+import { Form, Input, InputNumber, Button, Select, message, Spin, Alert, Card } from 'antd';
+import { ethers } from 'ethers';
+import useWallet from '../hooks/useWallet';
+
+const { Option } = Select;
+
+const TokenTransferForm = () => {
+  const [form] = Form.useForm();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const { isConnected, address, signer, provider, tokenBalances } = useWallet();
+
+  // 预设代币列表
+  const tokens = [
+    {
+      address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+      symbol: 'USDC',
+      name: 'USD Coin',
+      decimals: 6
+    },
+    {
+      address: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
+      symbol: 'USDT',
+      name: 'Tether USD',
+      decimals: 6
+    },
+    {
+      address: '0x6B175474E89094C44Da98b954EedeAC495271d0F',
+      symbol: 'DAI',
+      name: 'Dai Stablecoin',
+      decimals: 18
+    }
+  ];
+
+  // 处理表单提交
+  const onFinish = async (values) => {
+    if (!isConnected || !signer) {
+      message.error('请先连接钱包');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+
+    try {
+      // 验证接收地址格式
+      if (!ethers.utils.isAddress(values.recipient)) {
+        throw new Error('无效的接收地址');
+      }
+
+      // 模拟代币转账
+      // 实际实现中应该使用ERC20合约的transfer方法
+      console.log('转账参数:', {
+        tokenAddress: values.token,
+        recipient: values.recipient,
+        amount: values.amount
+      });
+
+      // 模拟成功
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      message.success('转账成功！');
+      form.resetFields();
+    } catch (err) {
+      console.error('转账失败:', err);
+      setError(err.message);
+      message.error(`转账失败: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Card title="代币转账" className="transfer-form">
+      {!isConnected ? (
+        <Alert
+          message="需要连接钱包"
+          description="请先连接您的钱包再进行转账操作"
+          type="warning"
+          showIcon
+          className="mb-4"
+        />
+      ) : (
+        <Form
+          form={form}
+          layout="vertical"
+          onFinish={onFinish}
+          className="mt-4"
+        >
+          {error && (
+            <Alert
+              message="操作失败"
+              description={error}
+              type="error"
+              showIcon
+              className="mb-4"
+            />
+          )}
+          
+          <Form.Item
+            label="代币"
+            name="token"
+            rules={[{ required: true, message: '请选择代币' }]}
+          >
+            <Select placeholder="选择要转账的代币">
+              {tokens.map(token => (
+                <Option key={token.address} value={token.address}>
+                  {token.name} ({token.symbol})
+                </Option>
+              ))}
+            </Select>
+          </Form.Item>
+
+          <Form.Item
+            label="接收地址"
+            name="recipient"
+            rules={[
+              { required: true, message: '请输入接收地址' },
+              {
+                validator: (_, value) => {
+                  if (!value || ethers.utils.isAddress(value)) {
+                    return Promise.resolve();
+                  }
+                  return Promise.reject(new Error('请输入有效的以太坊地址'));
+                }
+              }
+            ]}
+          >
+            <Input placeholder="请输入接收方的以太坊地址" />
+          </Form.Item>
+
+          <Form.Item
+            label="转账金额"
+            name="amount"
+            rules={[
+              { required: true, message: '请输入转账金额' },
+              { type: 'number', min: 0, message: '金额必须大于0' },
+              {
+                validator: async (_, value) => {
+                  if (!value || value <= 0) return Promise.resolve();
+                  
+                  const tokenAddress = form.getFieldValue('token');
+                  if (!tokenAddress) return Promise.resolve();
+                  
+                  // 检查余额是否充足
+                  // 实际实现中应该获取用户的实际余额
+                  return Promise.resolve();
+                }
+              }
+            ]}
+          >
+            <InputNumber 
+              className="w-full" 
+              placeholder="请输入转账金额" 
+              precision={6}
+              min={0}
+              step={0.000001}
+            />
+          </Form.Item>
+
+          <Form.Item>
+            <Button type="primary" htmlType="submit" loading={loading} block>
+              确认转账
+            </Button>
+          </Form.Item>
+        </Form>
+      )}
+    </Card>
+  );
+};
+
+export default TokenTransferForm;
+```
+
+## 5. Next.js中的Web3应用最佳实践
+
+### 5.1 钱包连接安全处理
+
+钱包连接是Web3应用的核心功能，需要特别注意安全性：
+
+```jsx
+// utils/securityUtils.js
+
+// 生成随机nonce防止重放攻击
+export const generateNonce = () => {
+  return ethers.utils.randomBytes(32).toString('hex');
+};
+
+// 构建消息签名请求
+export const buildSignatureMessage = (nonce, address, appName = 'My DApp') => {
+  return `${appName} 登录请求\n\n` +
+    `请签名此消息以验证您的身份\n` +
+    `地址: ${address}\n` +
+    `时间戳: ${Date.now()}\n` +
+    `随机值: ${nonce}\n\n` +
+    `此签名不会授权任何资金转移`;
+};
+
+// 验证签名
+export const verifySignature = async (address, signature, message) => {
+  try {
+    const recoveredAddress = ethers.utils.verifyMessage(message, signature);
+    return ethers.utils.getAddress(recoveredAddress) === ethers.utils.getAddress(address);
+  } catch (error) {
+    console.error('验证签名失败:', error);
+    return false;
+  }
+};
+
+// 安全地存储nonce (使用localStorage或安全cookie)
+export const storeNonce = (nonce) => {
+  try {
+    // 设置24小时过期
+    const expiry = Date.now() + 24 * 60 * 60 * 1000;
+    localStorage.setItem('wallet_nonce', nonce);
+    localStorage.setItem('wallet_nonce_expiry', expiry.toString());
+  } catch (error) {
+    console.error('存储nonce失败:', error);
+  }
+};
+
+// 检索存储的nonce
+export const getStoredNonce = () => {
+  try {
+    const nonce = localStorage.getItem('wallet_nonce');
+    const expiryStr = localStorage.getItem('wallet_nonce_expiry');
+    
+    if (!nonce || !expiryStr) return null;
+    
+    const expiry = parseInt(expiryStr, 10);
+    if (Date.now() > expiry) {
+      // nonce已过期
+      localStorage.removeItem('wallet_nonce');
+      localStorage.removeItem('wallet_nonce_expiry');
+      return null;
+    }
+    
+    return nonce;
+  } catch (error) {
+    console.error('获取nonce失败:', error);
+    return null;
+  }
+};
+```
+
+### 5.2 多链支持实现
+
+现代Web3应用通常需要支持多条链，以下是实现多链支持的方法：
+
+```jsx
+// utils/networks.js
+
+// 定义支持的网络
+export const SUPPORTED_NETWORKS = {
+  1: {
+    chainId: 1,
+    name: 'Ethereum Mainnet',
+    shortName: 'eth',
+    chain: 'ETH',
+    network: 'mainnet',
+    rpcUrls: ['https://mainnet.infura.io/v3/YOUR_INFURA_KEY'],
+    blockExplorerUrls: ['https://etherscan.io'],
+    nativeCurrency: {
+      name: 'Ether',
+      symbol: 'ETH',
+      decimals: 18
+    }
+  },
+  137: {
+    chainId: 137,
+    name: 'Polygon Mainnet',
+    shortName: 'matic',
+    chain: 'MATIC',
+    network: 'mainnet',
+    rpcUrls: ['https://polygon-rpc.com'],
+    blockExplorerUrls: ['https://polygonscan.com'],
+    nativeCurrency: {
+      name: 'Polygon',
+      symbol: 'MATIC',
+      decimals: 18
+    }
+  },
+  42161: {
+    chainId: 42161,
+    name: 'Arbitrum One',
+    shortName: 'arb1',
+    chain: 'ETH',
+    network: 'mainnet',
+    rpcUrls: ['https://arb1.arbitrum.io/rpc'],
+    blockExplorerUrls: ['https://arbiscan.io'],
+    nativeCurrency: {
+      name: 'Ether',
+      symbol: 'ETH',
+      decimals: 18
+    }
+  },
+  // 测试网络
+  11155111: {
+    chainId: 11155111,
+    name: 'Ethereum Sepolia',
+    shortName: 'sepolia',
+    chain: 'ETH',
+    network: 'sepolia',
+    rpcUrls: ['https://sepolia.infura.io/v3/YOUR_INFURA_KEY'],
+    blockExplorerUrls: ['https://sepolia.etherscan.io'],
+    nativeCurrency: {
+      name: 'Ether',
+      symbol: 'ETH',
+      decimals: 18
+    }
+  }
+};
+
+// 获取链配置
+export const getNetworkConfig = (chainId) => {
+  return SUPPORTED_NETWORKS[chainId];
+};
+
+// 检查链是否受支持
+export const isNetworkSupported = (chainId) => {
+  return SUPPORTED_NETWORKS[chainId] !== undefined;
+};
+
+// 切换网络
+export const switchNetwork = async (chainId) => {
+  if (!window.ethereum) {
+    throw new Error('MetaMask或其他钱包未安装');
+  }
+
+  try {
+    const networkConfig = SUPPORTED_NETWORKS[chainId];
+    if (!networkConfig) {
+      throw new Error(`不支持的网络: ${chainId}`);
+    }
+
+    // 尝试直接切换
+    await window.ethereum.request({
+      method: 'wallet_switchEthereumChain',
+      params: [{ chainId: `0x${chainId.toString(16)}` }],
+    });
+  } catch (error) {
+    // 处理用户拒绝切换
+    if (error.code === 4902) {
+      // 链未添加，尝试添加链
+      const networkConfig = SUPPORTED_NETWORKS[chainId];
+      if (!networkConfig) {
+        throw new Error(`无法添加网络: ${chainId}`);
+      }
+
+      try {
+        await window.ethereum.request({
+          method: 'wallet_addEthereumChain',
+          params: [networkConfig],
+        });
+      } catch (addError) {
+        throw new Error('添加网络失败');
+      }
+    } else {
+      throw error;
+    }
+  }
+};
+```
+
+### 5.3 优化Next.js性能
+
+对于Web3应用，性能优化尤为重要，以下是一些优化建议：
+
+```jsx
+// next.config.js
+module.exports = {
+  // 优化构建输出
+  output: 'standalone',
+  
+  // 启用静态HTML导出（如果适用）
+  exportTrailingSlash: true,
+  
+  // 资源优化
+  images: {
+    // 配置图片优化
+    domains: ['assets.coingecko.com', 'api.dicebear.com'],
+    minimumCacheTTL: 31536000,
+  },
+  
+  // 分割代码
+  experimental: {
+    // 预计算页面数据
+    prefetch: true,
+    // 支持新的React服务器组件
+    appDir: true,
+    // 内存优化
+    memoryBasedWorkers: true,
+  },
+  
+  // Webpack优化
+  webpack: (config, { isServer }) => {
+    // 修复ethers.js的某些导入问题
+    config.resolve.fallback = {
+      ...config.resolve.fallback,
+      fs: false,
+      net: false,
+      tls: false,
+    };
+    
+    // 仅在客户端打包Web3相关库
+    if (!isServer) {
+      config.module.rules.push({
+        test: /@?ethers\.js|web3|@web3-react/,
+        use: {
+          loader: 'babel-loader',
+          options: {
+            presets: ['next/babel'],
+            plugins: [
+              // 可以添加特定的Babel插件优化
+            ],
+          },
+        },
+      });
+    }
+    
+    return config;
+  },
+  
+  // 减少构建时间
+  optimizeFonts: true,
+  
+  // 启用压缩
+  compression: true,
+};
+```
+
+## 6. 总结与最佳实践
+
+### 6.1 安全最佳实践
+
+1. **钱包连接安全**
+   - 始终使用nonce和签名验证
+   - 实现防钓鱼和防重放攻击措施
+   - 清晰告知用户签名的目的
+
+2. **交易安全**
+   - 显示详细的交易参数和Gas费用
+   - 实现交易确认对话框
+   - 限制最大授权额度，避免无限授权
+
+3. **前端安全**
+   - 使用HTTPS
+   - 避免将敏感信息存储在localStorage中
+   - 实现输入验证和错误处理
+
+### 6.2 性能优化
+
+1. **代码优化**
+   - 延迟加载Web3相关库
+   - 使用React.memo和useMemo优化渲染
+   - 按需导入组件和库
+
+2. **数据处理**
+   - 缓存链上数据
+   - 批量请求优化
+   - 合理使用SSR和SSG
+
+3. **用户体验**
+   - 实现加载状态和骨架屏
+   - 添加交易状态通知
+   - 优化错误提示信息
+
+### 6.3 多链开发
+
+1. **链抽象**
+   - 将链特定逻辑抽象为通用接口
+   - 使用工厂模式创建不同链的提供者
+   - 维护统一的错误处理机制
+
+2. **用户体验**
+   - 提供链选择功能
+   - 显示当前链信息和余额
+   - 实现自动切换链的功能
+
+通过本文介绍的方法，开发者可以构建出高性能、安全且用户友好的React+Next.js Web3应用。结合React的组件化思想、Next.js的SSR/SSG能力以及现代状态管理库的优势，能够为用户提供流畅的区块链交互体验。
+
+随着Web3技术的不断发展，React和Next.js也在持续优化对区块链应用的支持。开发者应该关注最新的技术动态，不断优化自己的应用，为用户提供更好的Web3体验。

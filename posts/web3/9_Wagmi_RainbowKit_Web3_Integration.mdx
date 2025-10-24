@@ -1,0 +1,1167 @@
+---
+title: Wagmi与RainbowKit：构建现代Web3应用的完美组合
+publishedAt: 2025-10-20
+summary: 深入探讨Wagmi v2.18.1与RainbowKit v2.2.9的集成与使用，从配置到交易处理的完整指南
+tags:
+  - web3
+  - react
+  - wagmi
+  - rainbowkit
+  - 钱包集成
+---
+
+# Wagmi与RainbowKit：构建现代Web3应用的完美组合
+
+## 1. 简介
+
+随着Web3技术的不断发展，开发者需要更高效、更安全的工具来构建去中心化应用(DApp)。Wagmi和RainbowKit作为现代Web3前端开发的两大核心工具，为开发者提供了优秀的解决方案。
+
+### 1.1 Wagmi概述
+
+Wagmi是一个基于React Hooks的以太坊开发库，它提供了一套完整的工具集，帮助开发者轻松与以太坊区块链交互。
+
+**主要特点：**
+- 基于TypeScript构建，提供完整的类型安全
+- 模块化设计，支持按需导入
+- 内置状态管理，简化异步操作
+- 与Ethers.js或viem无缝集成
+- 支持多链开发
+
+### 1.2 RainbowKit概述
+
+RainbowKit是一个优雅的钱包连接UI组件库，它基于Wagmi构建，提供了美观且用户友好的钱包连接界面。
+
+**主要特点：**
+- 精美的钱包选择界面
+- 支持主流钱包（如MetaMask、Coinbase Wallet、WalletConnect等）
+- 自适应设计，适配各种设备
+- 自定义主题支持
+- 多链支持
+
+### 1.3 为什么选择Wagmi和RainbowKit
+
+- **开发效率**：提供开箱即用的Hooks和组件，减少样板代码
+- **用户体验**：RainbowKit提供优雅的UI，Wagmi确保流畅的交互
+- **类型安全**：完整的TypeScript支持，减少运行时错误
+- **社区支持**：活跃的开发社区和定期更新
+- **多链兼容性**：轻松支持以太坊及其他EVM兼容链
+
+## 2. 环境搭建与安装
+
+### 2.1 安装依赖
+
+```bash
+# 使用npm安装
+npm install wagmi@^2.18.1 @rainbow-me/rainbowkit@^2.2.9 ethers@^6.15.0
+
+# 或使用yarn安装
+yarn add wagmi@^2.18.1 @rainbow-me/rainbowkit@^2.2.9 ethers@^6.15.0
+```
+
+### 2.2 项目配置
+
+在Next.js项目中配置Wagmi和RainbowKit：
+
+```tsx
+// app/layout.tsx
+"use client"
+import { WagmiProvider, http } from 'wagmi';
+import { mainnet, sepolia } from 'wagmi/chains';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { RainbowKitProvider, getDefaultConfig } from '@rainbow-me/rainbowkit';
+import '@rainbow-me/rainbowkit/styles.css';
+
+// 创建QueryClient实例
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 1,
+      refetchOnWindowFocus: false,
+    }
+  }
+})
+
+// 从环境变量获取INFURA_KEY
+const INFURA_KEY = process.env.INFURA_KEY;
+
+// 创建RainbowKit配置
+const config = getDefaultConfig({
+  appName: 'Web3 Nextjs 2',
+  projectId: '1', // 从WalletConnect获取
+  chains: [mainnet, sepolia],
+  ssr: true,
+  transports: {
+    [mainnet.id]: http(`https://mainnet.infura.io/v3/${INFURA_KEY}`),
+    [sepolia.id]: http(`https://sepolia.infura.io/v3/${INFURA_KEY}`),
+  },
+})
+
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  return (
+    <html lang="en">
+      <body>
+        <WagmiProvider config={config}>
+          <QueryClientProvider client={queryClient}>
+            <RainbowKitProvider>
+              {children}
+            </RainbowKitProvider>
+          </QueryClientProvider>
+        </WagmiProvider>
+      </body>
+    </html>
+  );
+}
+```
+
+## 3. 钱包连接
+
+### 3.1 基础钱包连接按钮
+
+```tsx
+// app/page.tsx
+import { ConnectButton } from '@rainbow-me/rainbowkit';
+
+export default function Home() {
+  return (
+    <div className="flex flex-col items-center justify-center min-h-screen">
+      <h1>欢迎使用Web3应用</h1>
+      <ConnectButton />
+    </div>
+  );
+}
+```
+
+### 3.2 自定义钱包连接组件
+
+```tsx
+import { useConnect, useAccount, useDisconnect } from 'wagmi';
+import { InjectedConnector } from 'wagmi/connectors/injected';
+import { WalletConnectConnector } from 'wagmi/connectors/walletConnect';
+
+function CustomConnectButton() {
+  const { connect, isPending } = useConnect();
+  const { address, isConnected } = useAccount();
+  const { disconnect } = useDisconnect();
+
+  // 自定义钱包列表
+  const connectors = [
+    {
+      id: 'metamask',
+      name: 'MetaMask',
+      icon: '/metamask.svg',
+      connector: new InjectedConnector(),
+    },
+    {
+      id: 'walletconnect',
+      name: 'WalletConnect',
+      icon: '/walletconnect.svg',
+      connector: new WalletConnectConnector({
+        options: {
+          projectId: 'YOUR_PROJECT_ID',
+        },
+      }),
+    },
+  ];
+
+  if (isConnected) {
+    return (
+      <div className="flex items-center gap-2">
+        <span>{address?.substring(0, 6)}...{address?.substring(address.length - 4)}</span>
+        <button onClick={() => disconnect()} className="bg-red-500 text-white px-4 py-2 rounded">
+          断开连接
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="wallet-connect-container">
+      {connectors.map(({ id, name, icon, connector }) => (
+        <button
+          key={id}
+          onClick={() => connect({ connector } as any)}
+          disabled={isPending}
+          className="wallet-button flex items-center gap-2 p-3 border rounded"
+        >
+          <img src={icon} alt={name} width={24} height={24} />
+          <span>{name}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+```
+
+### 3.3 钱包连接状态管理
+
+```tsx
+import { useAccount, useConnect, useDisconnect } from 'wagmi';
+import { useState } from 'react';
+
+function WalletManager() {
+  const { address, isConnected, chainId } = useAccount();
+  const { connect, connectors } = useConnect();
+  const { disconnect } = useDisconnect();
+  const [showWalletList, setShowWalletList] = useState(false);
+
+  // 处理连接
+  const handleConnect = (connector) => {
+    connect({ connector });
+    setShowWalletList(false);
+  };
+
+  // 格式化地址显示
+  const formatAddress = (addr: string) => {
+    if (!addr) return '';
+    return `${addr.substring(0, 6)}...${addr.substring(addr.length - 4)}`;
+  };
+
+  return (
+    <div className="wallet-manager">
+      {isConnected ? (
+        <div className="connected-wallet">
+          <span>{formatAddress(address)}</span>
+          <span>Chain ID: {chainId}</span>
+          <button onClick={() => disconnect()}>断开</button>
+        </div>
+      ) : (
+        <div className="disconnected-wallet">
+          <button onClick={() => setShowWalletList(!showWalletList)}>
+            连接钱包
+          </button>
+          {showWalletList && (
+            <div className="wallet-list">
+              {connectors.map((connector) => (
+                <button
+                  key={connector.id}
+                  onClick={() => handleConnect(connector)}
+                >
+                  {connector.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+## 4. 交易处理
+
+### 4.1 基本交易发送
+
+```tsx
+import { useSendTransaction, useWaitForTransactionReceipt } from 'wagmi';
+import { parseEther } from 'viem'; // 注意：v2使用viem替代ethers
+
+function SendTransaction() {
+  const { sendTransaction, data: hash } = useSendTransaction();
+  const { isPending, isSuccess, isError, error } = useWaitForTransactionReceipt({
+    hash,
+  });
+
+  return (
+    <div>
+      <button
+        disabled={isPending}
+        onClick={() =>
+          sendTransaction({
+            to: '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045',
+            value: parseEther('0.01'),
+          })
+        }
+      >
+        {isPending ? '交易处理中...' : '发送0.01 ETH'}
+      </button>
+      {isSuccess && <div>交易成功！</div>}
+      {isError && <div>交易失败: {error?.message}</div>}
+    </div>
+  );
+}
+```
+
+### 4.2 合约交互
+
+使用`useContractWrite`和`useContractRead`与智能合约交互：
+
+```tsx
+import { useContractWrite, useReadContract, useWaitForTransactionReceipt } from 'wagmi';
+import { parseUnits } from 'viem';
+import { ERC20ABI } from './abi/ERC20';
+
+function TokenTransfer() {
+  const tokenAddress = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'; // USDC合约地址
+
+  // 读取余额
+  const { data: balance, isError, isLoading } = useReadContract({
+    address: tokenAddress,
+    abi: ERC20ABI,
+    functionName: 'balanceOf',
+    args: ['0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045'],
+  });
+
+  // 发送交易
+  const { write, data: hash } = useContractWrite({
+    address: tokenAddress,
+    abi: ERC20ABI,
+    functionName: 'transfer',
+  });
+
+  const { isPending, isSuccess, isError: txError } = useWaitForTransactionReceipt({
+    hash,
+  });
+
+  if (isLoading) return <div>加载中...</div>;
+  if (isError) return <div>读取错误</div>;
+
+  return (
+    <div>
+      <p>USDC余额: {balance?.toString()}</p>
+      <button
+        disabled={isPending}
+        onClick={() =>
+          write({
+            args: [
+              '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045',
+              parseUnits('100', 6), // USDC有6位小数
+            ],
+          })
+        }
+      >
+        {isPending ? '转账中...' : '转账100 USDC'}
+      </button>
+      {isSuccess && <div>转账成功！</div>}
+      {txError && <div>转账失败: {txError.message}</div>}
+    </div>
+  );
+}
+```
+
+### 4.3 交易参数优化
+
+设置适当的Gas参数以提高用户体验：
+
+```tsx
+import { useFeeData, useSendTransaction } from 'wagmi';
+import { parseEther } from 'viem';
+
+function OptimizedTransaction() {
+  const { data: feeData } = useFeeData();
+  const { sendTransaction } = useSendTransaction();
+
+  return (
+    <button
+      onClick={() =>
+        sendTransaction({
+          to: '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045',
+          value: parseEther('0.01'),
+          gas: 21000n, // v2使用BigInt字面量
+          maxFeePerGas: feeData?.maxFeePerGas ? feeData.maxFeePerGas * 110n / 100n : undefined, // 提高10%
+          maxPriorityFeePerGas: feeData?.maxPriorityFeePerGas ? feeData.maxPriorityFeePerGas * 110n / 100n : undefined,
+        })
+      }
+    >
+      发送交易（优化Gas）
+    </button>
+  );
+}
+```
+
+### 4.4 批量交易处理
+
+使用`useContractWrite`处理批量交易（v2中简化了API）：
+
+```tsx
+import { useContractWrite, useWaitForTransactionReceipt } from 'wagmi';
+import { parseEther } from 'viem';
+
+function BatchTransfer() {
+  // 发送交易
+  const { write, data: hash, isPending } = useContractWrite({
+    address: '0xBatchContractAddress',
+    abi: BatchContractABI,
+    functionName: 'batchTransfer',
+  });
+
+  const { isSuccess, isError, error } = useWaitForTransactionReceipt({
+    hash,
+  });
+
+  return (
+    <div>
+      <button 
+        disabled={isPending || !write} 
+        onClick={() => write?.({
+          args: [
+            ['0xAddr1', '0xAddr2', '0xAddr3'],
+            [parseEther('1'), parseEther('2'), parseEther('3')],
+          ],
+        })}
+      >
+        {isPending ? '处理中...' : '批量转账'}
+      </button>
+      {isSuccess && <div>批量转账成功！</div>}
+      {isError && <div>错误: {error?.message}</div>}
+    </div>
+  );
+}
+```
+
+## 5. 错误处理与用户体验优化
+
+### 5.1 常见错误类型与处理
+
+处理Web3应用中的各种错误场景，Wagmi v2使用了新的错误状态API：
+
+```tsx
+import { useContractWrite, useWaitForTransactionReceipt } from 'wagmi';
+import { parseUnits } from 'viem';
+import { ERC20ABI } from './abi/ERC20';
+
+function SafeTransaction() {
+  const { write, data: hash, isPending } = useContractWrite({
+    address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+    abi: ERC20ABI,
+    functionName: 'transfer',
+  });
+
+  const { isSuccess, isError, error } = useWaitForTransactionReceipt({
+    hash,
+  });
+
+  // 自定义错误处理
+  const handleError = (err: any) => {
+    if (err?.code === 4001) {
+      console.error('用户拒绝交易');
+      return '用户拒绝了交易，请重试';
+    }
+    if (err?.code === -32603) {
+      console.error('内部错误');
+      return '交易过程中发生内部错误，请检查网络连接';
+    }
+    if (err?.code === 3) {
+      console.error('执行错误', err);
+      return '交易执行失败，请检查余额是否充足';
+    }
+    return `未知错误: ${err?.message || '发生未知错误'}`;
+  };
+
+  return (
+    <div>
+      <button
+        onClick={() =>
+          write({
+            args: ['0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045', parseUnits('100', 6)],
+          })
+        }
+        disabled={isPending}
+      >
+        转账100 USDC
+      </button>
+      {isPending && <div>交易处理中...</div>}
+      {isSuccess && <div>交易成功！</div>}
+      {isError && <div className="error">{handleError(error)}</div>}
+    </div>
+  );
+}
+```
+
+### 5.2 加载状态与用户反馈
+
+提供清晰的加载状态和用户反馈，Wagmi v2提供了更丰富的状态管理：
+
+```tsx
+import { useContractRead } from 'wagmi';
+
+function OptimizedUX() {
+  const { data, isLoading, isError, error, refetch } = useContractRead({
+    address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+    abi: ERC20ABI,
+    functionName: 'balanceOf',
+    args: ['0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045'],
+  });
+
+  // 骨架屏加载状态
+  if (isLoading) {
+    return (
+      <div className="skeleton-container">
+        <div className="skeleton-line"></div>
+        <div className="skeleton-line"></div>
+        <div className="skeleton-button"></div>
+      </div>
+    );
+  }
+
+  // 错误状态
+  if (isError) {
+    return (
+      <div className="error-container">
+        <p>加载失败: {error?.message}</p>
+        <button onClick={() => refetch()}>重试</button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="content">
+      <h2>账户信息</h2>
+      <p>余额: {data?.toString()}</p>
+    </div>
+  );
+}
+```
+
+### 5.3 交易确认与提示
+
+提供交易确认和提示，增强用户体验，使用Wagmi v2的新API：
+
+```tsx
+import { useContractWrite, useWaitForTransactionReceipt } from 'wagmi';
+import { parseUnits } from 'viem';
+import { toast } from 'react-toastify';
+import { ERC20ABI } from './abi/ERC20';
+import { useState, useEffect } from 'react';
+
+function ConfirmedTransaction() {
+  const { write, data: hash, isPending } = useContractWrite({
+    address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+    abi: ERC20ABI,
+    functionName: 'transfer',
+  });
+
+  const { isSuccess, isError, error } = useWaitForTransactionReceipt({
+    hash,
+  });
+
+  const handleTransfer = () => {
+    // 交易前确认
+    if (!window.confirm('确认转账100 USDC?')) return;
+    
+    toast.info('交易已提交，等待确认...');
+    
+    write({
+      args: ['0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045', parseUnits('100', 6)],
+      onSuccess: () => {
+        toast.success('交易已提交，等待区块链确认');
+      },
+    });
+  };
+
+  // 监听交易状态
+  useEffect(() => {
+    if (isSuccess) {
+      toast.success('交易已确认！');
+    }
+    if (isError) {
+      toast.error(`交易失败: ${error?.message}`);
+    }
+  }, [isSuccess, isError, error]);
+
+  return (
+    <button
+      disabled={isPending}
+      onClick={handleTransfer}
+    >
+      转账100 USDC
+    </button>
+  );
+}
+```
+
+## 6. 多链支持
+
+### 6.1 配置多链环境
+
+```tsx
+// app/layout.tsx
+import { createConfig, http } from 'wagmi';
+import {
+  mainnet,
+  polygon,
+  arbitrum,
+  optimism,
+  base,
+  sepolia,
+} from 'wagmi/chains';
+import { getDefaultConfig } from '@rainbow-me/rainbowkit';
+
+const chains = [mainnet, polygon, arbitrum, optimism, base, sepolia];
+
+// 创建RainbowKit配置
+const rainbowConfig = getDefaultConfig({
+  appName: 'My Multi-Chain App',
+  projectId: 'YOUR_PROJECT_ID',
+  chains,
+  ssr: true,
+});
+
+// 创建Wagmi配置
+const config = createConfig({
+  chains,
+  transports: {
+    [mainnet.id]: http('https://mainnet.infura.io/v3/YOUR_INFURA_KEY'),
+    [polygon.id]: http('https://polygon-mainnet.infura.io/v3/YOUR_INFURA_KEY'),
+    [arbitrum.id]: http('https://arbitrum-mainnet.infura.io/v3/YOUR_INFURA_KEY'),
+    [optimism.id]: http('https://optimism-mainnet.infura.io/v3/YOUR_INFURA_KEY'),
+    [base.id]: http('https://base-mainnet.infura.io/v3/YOUR_INFURA_KEY'),
+    [sepolia.id]: http('https://sepolia.infura.io/v3/YOUR_INFURA_KEY'),
+  },
+  connectors: rainbowConfig.connectors,
+});
+```
+
+### 6.2 网络切换
+
+```tsx
+import { useSwitchChain, useChainId } from 'wagmi';
+import { mainnet, polygon, arbitrum, optimism, base } from 'wagmi/chains';
+
+function NetworkSwitcher() {
+  const chainId = useChainId();
+  const { switchChain, isPending } = useSwitchChain();
+
+  const networks = [
+    { chain: mainnet, name: 'Ethereum' },
+    { chain: polygon, name: 'Polygon' },
+    { chain: arbitrum, name: 'Arbitrum' },
+    { chain: optimism, name: 'Optimism' },
+    { chain: base, name: 'Base' },
+  ];
+
+  return (
+    <div className="network-switcher">
+      <p>当前网络: {networks.find(n => n.chain.id === chainId)?.name || '未知'}</p>
+      <div className="network-options">
+        {networks.map(({ chain, name }) => (
+          <button
+            key={chain.id}
+            disabled={chainId === chain.id || isPending}
+            onClick={() => switchChain({ chainId: chain.id })}
+            className={`network-option ${chainId === chain.id ? 'active' : ''}`}
+          >
+            {name}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+```
+
+### 6.3 链特定数据处理
+
+```tsx
+import { useChainId } from 'wagmi';
+import { mainnet, polygon, arbitrum } from 'wagmi/chains';
+import { useReadContract } from 'wagmi';
+
+// 定义不同链上的合约地址
+const TOKEN_ADDRESSES = {
+  [mainnet.id]: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
+  [polygon.id]: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174', // USDC
+  [arbitrum.id]: '0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8', // USDC
+};
+
+function ChainSpecificContract() {
+  const chainId = useChainId();
+  const tokenAddress = TOKEN_ADDRESSES[chainId as keyof typeof TOKEN_ADDRESSES];
+
+  const { data: balance } = useReadContract({
+    address: tokenAddress,
+    abi: ERC20ABI,
+    functionName: 'balanceOf',
+    args: ['0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045'],
+    enabled: !!tokenAddress, // 仅当有合约地址时才请求
+  });
+
+  return (
+    <div>
+      {tokenAddress ? (
+        <p>当前链上USDC余额: {balance?.toString()}</p>
+      ) : (
+        <p>当前链不支持此功能</p>
+      )}
+    </div>
+  );
+}
+```
+
+## 7. 安全最佳实践
+
+### 7.1 授权管理
+
+```tsx
+import { useContractWrite, useReadContract } from 'wagmi';
+import { parseUnits } from 'viem';
+import { ERC20ABI } from './abi/ERC20';
+
+function TokenApprovalManager() {
+  const tokenAddress = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'; // USDC
+  const spenderAddress = '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D'; // 例如Uniswap Router
+  
+  // 检查当前授权额度
+  const { data: allowance } = useReadContract({
+    address: tokenAddress,
+    abi: ERC20ABI,
+    functionName: 'allowance',
+    args: ['0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045', spenderAddress],
+  });
+
+  // 批准授权
+  const { write: approve, isPending } = useContractWrite({
+    address: tokenAddress,
+    abi: ERC20ABI,
+    functionName: 'approve',
+  });
+
+  // 无限授权警告
+  const handleApprove = (amount: string) => {
+    const parsedAmount = amount === 'unlimited' 
+      ? BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff')
+      : parseUnits(amount, 6);
+    
+    if (amount === 'unlimited') {
+      if (!window.confirm('警告：无限授权存在安全风险，建议仅在信任的应用程序中使用。')) {
+        return;
+      }
+    }
+    
+    approve({
+      args: [spenderAddress, parsedAmount],
+    });
+  };
+
+  return (
+    <div className="approval-manager">
+      <p>当前授权额度: {allowance?.toString()}</p>
+      <div className="approval-actions">
+        <button 
+          disabled={isPending}
+          onClick={() => handleApprove('100000')}
+        >
+          批准100,000 USDC
+        </button>
+        <button 
+          disabled={isPending}
+          onClick={() => handleApprove('unlimited')}
+          className="warning"
+        >
+          无限授权 (不推荐)
+        </button>
+      </div>
+    </div>
+  );
+}
+```
+
+### 7.2 交易风险提示
+
+```tsx
+import { useContractWrite, useWaitForTransactionReceipt } from 'wagmi';
+import { parseEther } from 'viem';
+
+function SafeTransactionWithWarning() {
+  const { write, data: hash, isPending } = useContractWrite({
+    address: '0xContractAddress',
+    abi: ContractABI,
+    functionName: 'functionName',
+  });
+
+  const { isSuccess, isError } = useWaitForTransactionReceipt({
+    hash,
+  });
+
+  const handleTransaction = () => {
+    // 显示风险提示
+    const riskWarning = document.createElement('div');
+    riskWarning.className = 'risk-warning-overlay';
+    riskWarning.innerHTML = `
+      <div className="risk-warning-content">
+        <h3>交易风险提示</h3>
+        <p>在继续交易前，请确保：</p>
+        <ul>
+          <li>您了解交易的所有参数和可能的结果</li>
+          <li>您信任交互的智能合约</li>
+          <li>您已仔细检查交易金额和地址</li>
+        </ul>
+        <div className="risk-warning-actions">
+          <button id="cancel-btn">取消</button>
+          <button id="confirm-btn">确认继续</button>
+        </div>
+      </div>
+    `;
+    
+    document.body.appendChild(riskWarning);
+    
+    // 添加事件监听器
+    document.getElementById('cancel-btn')?.addEventListener('click', () => {
+      document.body.removeChild(riskWarning);
+    });
+    
+    document.getElementById('confirm-btn')?.addEventListener('click', () => {
+      document.body.removeChild(riskWarning);
+      write({ args: ['参数1', '参数2'] });
+    });
+  };
+
+  return (
+    <button 
+      disabled={isPending}
+      onClick={handleTransaction}
+    >
+      执行操作
+    </button>
+  );
+}
+```
+
+### 7.3 防止重复提交
+
+```tsx
+import { useContractWrite, useWaitForTransactionReceipt } from 'wagmi';
+import { useState } from 'react';
+
+function PreventDoubleSubmit() {
+  const { write, data: hash, isPending } = useContractWrite({
+    address: '0xContractAddress',
+    abi: ContractABI,
+    functionName: 'functionName',
+  });
+
+  const { isSuccess, isError } = useWaitForTransactionReceipt({
+    hash,
+  });
+
+  // 使用额外的状态锁，确保即使在网络延迟情况下也不会重复提交
+  const [transactionLocked, setTransactionLocked] = useState(false);
+
+  const handleSubmit = async () => {
+    if (transactionLocked) return;
+    
+    setTransactionLocked(true);
+    try {
+      // 执行交易
+      await write({
+        args: ['参数1', '参数2'],
+        onSuccess: () => {
+          console.log('交易提交成功');
+        },
+        onError: (error) => {
+          console.error('交易提交失败', error);
+          // 发生错误时立即解锁
+          setTransactionLocked(false);
+        },
+      });
+    } catch (error) {
+      console.error('错误', error);
+      setTransactionLocked(false);
+    }
+  };
+
+  // 交易完成后解锁
+  React.useEffect(() => {
+    if (isSuccess || isError) {
+      setTransactionLocked(false);
+    }
+  }, [isSuccess, isError]);
+
+  return (
+    <button 
+      disabled={isPending || transactionLocked}
+      onClick={handleSubmit}
+    >
+      {isPending || transactionLocked ? '处理中...' : '提交交易'}
+    </button>
+  );
+}
+```
+
+## 8. 高级用例
+
+### 8.1 签名消息
+
+```tsx
+import { useSignMessage, useAccount } from 'wagmi';
+
+function SignMessageExample() {
+  const { address } = useAccount();
+  const { signMessage, data: signature, isPending, isError, error } = useSignMessage();
+
+  // 创建一个挑战消息，通常包含随机数和时间戳
+  const createChallengeMessage = () => {
+    const timestamp = Date.now();
+    const nonce = Math.random().toString(36).substring(2);
+    return `登录请求\n\n地址: ${address}\n时间戳: ${timestamp}\n随机数: ${nonce}`;
+  };
+
+  const handleSignMessage = () => {
+    const message = createChallengeMessage();
+    signMessage({ message });
+  };
+
+  return (
+    <div>
+      <button 
+        onClick={handleSignMessage}
+        disabled={isPending}
+      >
+        {isPending ? '签名中...' : '签名消息'}
+      </button>
+      {signature && (
+        <div className="signature-container">
+          <p>签名结果:</p>
+          <code>{signature}</code>
+        </div>
+      )}
+      {isError && <div className="error">签名失败: {error?.message}</div>}
+    </div>
+  );
+}
+```
+
+### 8.2 批量调用
+
+```tsx
+import { useContractRead } from 'wagmi';
+import { useMemo } from 'react';
+
+// 创建一个自定义Hook来批量获取代币余额
+function useBatchTokenBalances(address: string, tokens: Array<{ address: string; symbol: string }>) {
+  // 使用useContractRead对每个代币进行调用
+  const balances = useMemo(() => {
+    return tokens.map(token => {
+      const { data, isLoading, isError } = useContractRead({
+        address: token.address,
+        abi: ERC20ABI,
+        functionName: 'balanceOf',
+        args: [address],
+        key: `${token.address}-${address}`, // 为每个调用提供唯一key
+      });
+      
+      return {
+        symbol: token.symbol,
+        balance: data,
+        isLoading,
+        isError,
+      };
+    });
+  }, [address, tokens]);
+
+  return balances;
+}
+
+// 使用示例
+function TokenBalances() {
+  const { address } = useAccount();
+  
+  const tokens = [
+    { address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', symbol: 'USDC' },
+    { address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', symbol: 'USDT' },
+    { address: '0x6B175474E89094C44Da98b954EedeAC495271d0F', symbol: 'DAI' },
+  ];
+
+  const balances = useBatchTokenBalances(address || '', tokens);
+
+  if (!address) return <div>请先连接钱包</div>;
+
+  return (
+    <div className="token-balances">
+      <h3>代币余额</h3>
+      {balances.map(token => (
+        <div key={token.symbol} className="token-item">
+          <span>{token.symbol}</span>
+          {token.isLoading ? (
+            <span>加载中...</span>
+          ) : token.isError ? (
+            <span>加载失败</span>
+          ) : (
+            <span>{token.balance?.toString()}</span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+```
+
+### 8.3 监听链上事件
+
+```tsx
+import { useContractEvent } from 'wagmi';
+import { useState } from 'react';
+
+function EventListener() {
+  const [events, setEvents] = useState([]);
+  const tokenAddress = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
+
+  // 监听Transfer事件
+  useContractEvent({
+    address: tokenAddress,
+    abi: ERC20ABI,
+    eventName: 'Transfer',
+    listener: (from, to, amount) => {
+      setEvents(prev => [
+        { from, to, amount: amount.toString(), timestamp: new Date().toISOString() },
+        ...prev.slice(0, 9), // 仅保留最近10个事件
+      ]);
+    },
+  });
+
+  return (
+    <div className="event-listener">
+      <h3>最近Transfer事件</h3>
+      <div className="events-list">
+        {events.map((event, index) => (
+          <div key={index} className="event-item">
+            <p>From: {event.from}</p>
+            <p>To: {event.to}</p>
+            <p>Amount: {event.amount}</p>
+            <p>Time: {new Date(event.timestamp).toLocaleString()}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+```
+
+## 9. 部署与优化
+
+### 9.1 构建优化
+
+针对Next.js项目的Wagmi和RainbowKit优化：
+
+```js
+// next.config.js
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  reactStrictMode: true,
+  swcMinify: true,
+  // 优化Web3库的Tree Shaking
+  webpack: (config) => {
+    config.resolve.fallback = {
+      ...config.resolve.fallback,
+      fs: false,
+      net: false,
+      tls: false,
+    };
+    return config;
+  },
+  // 配置预渲染规则，避免在静态生成时调用Web3相关功能
+  experimental: {
+    // 优化服务端渲染
+    serverActions: true,
+  },
+};
+
+module.exports = nextConfig;
+```
+
+### 9.2 延迟加载Web3组件
+
+```tsx
+// app/page.tsx
+import dynamic from 'next/dynamic';
+import { ConnectButton } from '@rainbow-me/rainbowkit';
+
+// 延迟加载交易相关组件
+const TransactionComponent = dynamic(() => import('./TransactionComponent'), {
+  loading: () => <p>加载中...</p>,
+  ssr: false, // 禁用服务端渲染
+});
+
+function Home() {
+  return (
+    <div>
+      <header className="flex justify-between items-center p-4">
+        <h1>My Web3 App</h1>
+        <ConnectButton />
+      </header>
+      
+      <main className="p-4">
+        <TransactionComponent />
+      </main>
+    </div>
+  );
+}
+
+export default Home;
+```
+
+### 9.3 性能优化
+
+```tsx
+import { useAccount, useBalance, useContractRead } from 'wagmi';
+import { memo, useMemo } from 'react';
+
+// 使用React.memo优化组件重渲染
+const AccountInfo = memo(function AccountInfo({ address }) {
+  // 使用结构解构和useMemo优化状态访问
+  const { data: balance } = useBalance({ address });
+  
+  // 优化数据格式化
+  const formattedBalance = useMemo(() => {
+    if (!balance) return '0';
+    return balance.formatted;
+  }, [balance]);
+
+  return (
+    <div className="account-info">
+      <p>地址: {address}</p>
+      <p>余额: {formattedBalance} ETH</p>
+    </div>
+  );
+});
+
+// 使用优化的组件
+function Dashboard() {
+  const { address } = useAccount();
+  
+  // 仅在地址存在时渲染组件
+  if (!address) return <div>请先连接钱包</div>;
+  
+  return (
+    <div className="dashboard">
+      <AccountInfo address={address} />
+      {/* 其他组件 */}
+    </div>
+  );
+}
+```
+
+## 10. 结论与最佳实践
+
+### 10.1 总结
+
+Wagmi v2.18.1与RainbowKit v2.2.9的组合为开发者提供了构建现代Web3应用的强大工具。通过本文的学习，我们了解了：
+
+- Wagmi的核心功能和Hooks API
+- RainbowKit提供的优雅钱包连接体验
+- 如何处理交易、错误和用户体验
+- 多链支持和配置
+- 安全最佳实践和高级用例
+
+### 10.2 最佳实践建议
+
+1. **安全第一**：始终验证用户输入，避免无限授权，提供交易确认机制
+2. **用户体验优先**：提供清晰的加载状态和错误信息，使用骨架屏优化加载体验
+3. **代码组织**：将Web3逻辑模块化，使用自定义Hook封装复杂操作
+4. **性能优化**：使用React.memo、useMemo和懒加载减少不必要的重渲染
+5. **多链考虑**：设计时考虑多链支持，避免硬编码链ID和地址
+6. **版本兼容**：定期更新依赖，注意API变更（如Wagmi v2的重大变更）
+
+### 10.3 后续学习资源
+
+- [Wagmi官方文档](https://wagmi.sh/)
+- [RainbowKit官方文档](https://www.rainbowkit.com/)
+- [Ethers.js文档](https://docs.ethers.io/)
+- [Viem文档](https://viem.sh/)
+- [Web3安全最佳实践](https://consensys.github.io/smart-contract-best-practices/)
+
+通过遵循这些最佳实践，您可以构建出既安全又用户友好的Web3应用，为用户提供无缝的区块链交互体验。
