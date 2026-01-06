@@ -1,0 +1,1005 @@
+---
+title: Web3 DApp开发实战指南：从钱包连接到NFT查看器
+publishedAt: 2025-10-27
+summary: 基于Next.js与主流Web3库构建入门级区块链应用完整教程
+tags:
+  - web3
+  - nextjs
+  - react
+  - blockchain
+---
+
+# Web3 DApp开发实战指南：从钱包连接到NFT查看器
+
+## 技术栈概述
+基于Next.js 16.0.0、React 19.2.0、Tailwind CSS 4.0.0构建前端框架，集成Ethers 6.15.0、Wagmi 2.18.1、RainbowKit 2.2.9、Viem 2.38.3实现区块链交互，使用Zustand 5.0.8进行状态管理，开发入门级Web3应用。
+
+## 项目实践方案
+
+### 1. 钱包连接演示应用
+**核心功能**：
+- 实现多钱包适配（MetaMask、Coinbase Wallet等主流钱包）
+- 展示当前连接地址及ETH余额
+- 实现钱包断开连接功能
+- 添加网络切换检测与提示
+
+**技术要点**：
+- 使用RainbowKit提供预制连接组件
+- 通过Wagmi Hooks获取账户状态与余额数据
+- 利用Zustand维护全局连接状态
+
+#### 实现步骤
+
+**1. 创建钱包连接组件**
+
+在`components/WalletConnect.tsx`中实现钱包连接界面：
+
+```tsx
+'use client';
+
+import { ConnectButton } from '@rainbow-me/rainbowkit';
+import { useAccount, useBalance, useChainId } from 'wagmi';
+import { formatEther } from 'viem';
+import { useNetworkStore } from '@/store/network';
+
+export function WalletConnect() {
+  const { address, isConnected, isConnecting } = useAccount();
+  const { data: balance } = useBalance({ address });
+  const chainId = useChainId();
+  const { networkName } = useNetworkStore();
+
+  const formatAddress = (addr?: string) => {
+    if (!addr) return '';
+    return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+  };
+
+  return (
+    <div className="flex flex-col items-center gap-4 p-6 bg-dark rounded-lg shadow-lg border border-gray-800">
+      <h2 className="text-2xl font-bold text-light mb-4">钱包连接</h2>
+      
+      <div className="w-full">
+        <ConnectButton />
+      </div>
+
+      {isConnected && (
+        <div className="w-full space-y-4 mt-4">
+          <div className="flex justify-between items-center p-4 bg-gray-900 rounded-lg">
+            <span className="text-light">当前地址：</span>
+            <span className="text-primary font-mono">{formatAddress(address)}</span>
+          </div>
+          
+          <div className="flex justify-between items-center p-4 bg-gray-900 rounded-lg">
+            <span className="text-light">ETH余额：</span>
+            <span className="text-secondary font-mono">
+              {balance ? formatEther(balance.value) : '0'}
+            </span>
+          </div>
+          
+          <div className="flex justify-between items-center p-4 bg-gray-900 rounded-lg">
+            <span className="text-light">当前网络：</span>
+            <span className="text-green-400 font-medium">{networkName}</span>
+          </div>
+        </div>
+      )}
+
+      {isConnecting && (
+        <div className="mt-4 text-center text-yellow-400">
+          正在连接钱包...
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+**2. 创建网络状态管理**
+
+在`store/network.ts`中使用Zustand管理网络状态：
+
+```tsx
+import { create } from 'zustand';
+import { useChainId } from 'wagmi';
+
+interface NetworkStore {
+  networkName: string;
+  setNetworkName: (name: string) => void;
+  isTestnet: boolean;
+  setIsTestnet: (isTestnet: boolean) => void;
+}
+
+export const useNetworkStore = create<NetworkStore>((set) => ({
+  networkName: '未知网络',
+  setNetworkName: (name) => set({ networkName: name }),
+  isTestnet: false,
+  setIsTestnet: (isTestnet) => set({ isTestnet }),
+}));
+
+// 网络检测钩子
+export function useNetworkDetector() {
+  const chainId = useChainId();
+  const { setNetworkName, setIsTestnet } = useNetworkStore();
+
+  useEffect(() => {
+    // 映射链ID到网络名称
+    const networkMap: Record<number, { name: string; isTestnet: boolean }> = {
+      1: { name: '以太坊主网', isTestnet: false },
+      5: { name: 'Goerli测试网', isTestnet: true },
+      11155111: { name: 'Sepolia测试网', isTestnet: true },
+      137: { name: 'Polygon主网', isTestnet: false },
+      80001: { name: 'Polygon Mumbai', isTestnet: true },
+    };
+
+    const network = networkMap[chainId] || { name: `未知网络 (${chainId})`, isTestnet: false };
+    setNetworkName(network.name);
+    setIsTestnet(network.isTestnet);
+  }, [chainId, setNetworkName, setIsTestnet]);
+}
+
+### 2. 代币转账DApp
+**核心功能**：
+- 实现ERC-20代币余额查询
+- 构建转账表单（接收地址、转账金额）
+- 添加Gas费用预估显示
+- 实现交易状态反馈与历史记录
+
+**技术要点**：
+- 使用Ethers.js构建转账交易逻辑
+- 通过Viem处理链上数据格式化
+- 实现交易确认轮询机制
+
+#### 实现步骤
+
+**1. ERC-20代币ABI与接口**
+
+在`lib/abis/erc20.ts`中定义ERC-20代币接口：
+
+```typescript
+export const erc20ABI = [
+  'function name() view returns (string)',
+  'function symbol() view returns (string)',
+  'function decimals() view returns (uint8)',
+  'function balanceOf(address) view returns (uint256)',
+  'function transfer(address to, uint256 amount) returns (bool)',
+  'function allowance(address owner, address spender) view returns (uint256)',
+  'function approve(address spender, uint256 amount) returns (bool)',
+] as const;
+
+// 常用代币地址（Goerli测试网）
+export const TEST_TOKENS = {
+  DAI: '0xdc31Ee1784292379Fbb2964b3B9C4124D8F89C60',
+  USDC: '0x07865c6e87b9f70255377e024ace6630c1eaa37f',
+};
+```
+
+**2. 创建代币转账组件**
+
+在`components/TokenTransfer.tsx`中实现转账功能：
+
+```tsx
+'use client';
+
+import { useState, useEffect } from 'react';
+import { useAccount, useSendTransaction, useWaitForTransaction } from 'wagmi';
+import { erc20ABI, TEST_TOKENS } from '@/lib/abis/erc20';
+import { ethers } from 'ethers';
+import { useTokenStore } from '@/store/token';
+
+export function TokenTransfer() {
+  const { address, isConnected } = useAccount();
+  const { selectedToken, tokenBalance, setSelectedToken, setTokenBalance } = useTokenStore();
+  const [recipient, setRecipient] = useState('');
+  const [amount, setAmount] = useState('');
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  
+  const { data: txData, sendTransaction, isPending } = useSendTransaction();
+  const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransaction({
+    hash: txData?.hash,
+  });
+
+  // 加载代币余额
+  useEffect(() => {
+    if (!isConnected || !selectedToken) return;
+
+    const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL);
+    const tokenContract = new ethers.Contract(selectedToken.address, erc20ABI, provider);
+    
+    async function fetchBalance() {
+      try {
+        const balance = await tokenContract.balanceOf(address!);
+        const decimals = await tokenContract.decimals();
+        setTokenBalance(ethers.formatUnits(balance, decimals));
+      } catch (err) {
+        console.error('获取代币余额失败:', err);
+        setTokenBalance('0');
+      }
+    }
+
+    fetchBalance();
+  }, [isConnected, selectedToken, address, setTokenBalance]);
+
+  // 处理代币转账
+  const handleTransfer = async () => {
+    setError('');
+    setSuccess('');
+
+    // 验证输入
+    if (!ethers.isAddress(recipient)) {
+      setError('请输入有效的接收地址');
+      return;
+    }
+
+    if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
+      setError('请输入有效的转账金额');
+      return;
+    }
+
+    if (!selectedToken) {
+      setError('请选择要转账的代币');
+      return;
+    }
+
+    try {
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const signer = await provider.getSigner();
+      const tokenContract = new ethers.Contract(selectedToken.address, erc20ABI, signer);
+      
+      const decimals = await tokenContract.decimals();
+      const amountInWei = ethers.parseUnits(amount, decimals);
+      
+      // 构建交易
+      const tx = await tokenContract.transfer.populateTransaction(recipient, amountInWei);
+      
+      // 发送交易
+      sendTransaction(tx);
+    } catch (err) {
+      console.error('转账失败:', err);
+      setError('转账失败，请检查您的钱包和网络');
+    }
+  };
+
+  // 交易确认后处理
+  useEffect(() => {
+    if (isConfirmed && txData?.hash) {
+      setSuccess(`转账成功！交易哈希: ${txData.hash}`);
+      setRecipient('');
+      setAmount('');
+    }
+  }, [isConfirmed, txData]);
+
+  if (!isConnected) {
+    return (
+      <div className="p-6 bg-dark rounded-lg border border-gray-800 text-center">
+        <p className="text-yellow-400">请先连接钱包</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-6 bg-dark rounded-lg border border-gray-800 space-y-6">
+      <h2 className="text-2xl font-bold text-light">代币转账</h2>
+      
+      {/* 代币选择器 */}
+      <div className="space-y-2">
+        <label className="text-light">选择代币</label>
+        <select
+          className="w-full p-3 bg-gray-900 text-light border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+          value={selectedToken?.address || ''}
+          onChange={(e) => {
+            const tokenAddress = e.target.value;
+            const token = tokenAddress ? {
+              address: tokenAddress,
+              symbol: Object.entries(TEST_TOKENS).find(([_, addr]) => addr === tokenAddress)?.[0] || '代币'
+            } : null;
+            setSelectedToken(token);
+          }}
+        >
+          <option value="">-- 请选择代币 --</option>
+          {Object.entries(TEST_TOKENS).map(([symbol, address]) => (
+            <option key={address} value={address}>{symbol}</option>
+          ))}
+        </select>
+      </div>
+
+      {selectedToken && (
+        <div className="p-3 bg-gray-900 rounded-lg text-light">
+          当前余额: <span className="text-secondary font-mono">{tokenBalance}</span> {selectedToken.symbol}
+        </div>
+      )}
+      
+      {/* 转账表单 */}
+      <div className="space-y-4">
+        <div className="space-y-2">
+          <label className="text-light">接收地址</label>
+          <input
+            type="text"
+            className="w-full p-3 bg-gray-900 text-light border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+            placeholder="输入接收方钱包地址"
+            value={recipient}
+            onChange={(e) => setRecipient(e.target.value)}
+          />
+        </div>
+        
+        <div className="space-y-2">
+          <label className="text-light">转账金额</label>
+          <input
+            type="number"
+            step="0.000001"
+            className="w-full p-3 bg-gray-900 text-light border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+            placeholder="输入转账金额"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+          />
+        </div>
+        
+        <button
+          className="w-full py-3 bg-primary hover:bg-primary/80 text-white rounded-lg transition duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+          onClick={handleTransfer}
+          disabled={isPending || isConfirming || !selectedToken}
+        >
+          {isPending ? '正在提交...' : isConfirming ? '等待确认...' : '确认转账'}
+        </button>
+      </div>
+      
+      {error && <div className="p-3 bg-red-900/30 text-red-400 rounded-lg">{error}</div>}
+      {success && <div className="p-3 bg-green-900/30 text-green-400 rounded-lg">{success}</div>}
+    </div>
+  );
+}
+```
+
+**3. 创建代币状态管理**
+
+在`store/token.ts`中使用Zustand管理代币状态：
+
+```tsx
+import { create } from 'zustand';
+
+interface Token {
+  address: string;
+  symbol: string;
+}
+
+interface TokenStore {
+  selectedToken: Token | null;
+  setSelectedToken: (token: Token | null) => void;
+  tokenBalance: string;
+  setTokenBalance: (balance: string) => void;
+  transactionHistory: Array<{
+    hash: string;
+    token: string;
+    amount: string;
+    to: string;
+    timestamp: number;
+    status: 'pending' | 'confirmed' | 'failed';
+  }>;
+  addTransaction: (tx: Omit<TokenStore['transactionHistory'][0], 'timestamp'>) => void;
+  updateTransactionStatus: (hash: string, status: 'confirmed' | 'failed') => void;
+}
+
+export const useTokenStore = create<TokenStore>((set) => ({
+  selectedToken: null,
+  setSelectedToken: (token) => set({ selectedToken: token }),
+  tokenBalance: '0',
+  setTokenBalance: (balance) => set({ tokenBalance: balance }),
+  transactionHistory: [],
+  addTransaction: (tx) => set((state) => ({
+    transactionHistory: [...state.transactionHistory, { ...tx, timestamp: Date.now() }]
+  })),
+  updateTransactionStatus: (hash, status) => set((state) => ({
+    transactionHistory: state.transactionHistory.map(tx =>
+      tx.hash === hash ? { ...tx, status } : tx
+    )
+  }))
+}));
+
+### 3. NFT查看器应用
+**核心功能**：
+- 读取用户钱包NFT资产
+- 按合约地址分类展示NFT集合
+- 实现NFT元数据解析（图片、名称、属性）
+- 添加NFT详情查看模态框
+
+**技术要点**：
+- 调用ERC-721标准接口获取NFT数据
+- 使用IPFS网关解析NFT媒体资源
+- 实现懒加载优化NFT图片展示
+
+#### 实现步骤
+
+**1. ERC-721代币ABI与接口**
+
+在`lib/abis/erc721.ts`中定义ERC-721代币接口：
+
+```typescript
+export const erc721ABI = [
+  'function name() view returns (string)',
+  'function symbol() view returns (string)',
+  'function tokenURI(uint256 tokenId) view returns (string)',
+  'function ownerOf(uint256 tokenId) view returns (address)',
+  'function balanceOf(address owner) view returns (uint256)',
+  'function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)',
+] as const;
+
+// IPFS网关地址
+export const IPFS_GATEWAY = 'https://ipfs.io/ipfs/';
+
+// 解析IPFS链接
+export function resolveIPFSUrl(ipfsUrl: string): string {
+  if (ipfsUrl.startsWith('ipfs://')) {
+    return ipfsUrl.replace('ipfs://', IPFS_GATEWAY);
+  }
+  return ipfsUrl;
+}
+```
+
+**2. 创建NFT查看器组件**
+
+在`components/NFTViewer.tsx`中实现NFT查看功能：
+
+```tsx
+'use client';
+
+import { useState, useEffect, useRef } from 'react';
+import { useAccount } from 'wagmi';
+import { erc721ABI, resolveIPFSUrl } from '@/lib/abis/erc721';
+import { ethers } from 'ethers';
+
+export interface NFTMetadata {
+  name: string;
+  description: string;
+  image: string;
+  attributes?: Array<{
+    trait_type: string;
+    value: string | number;
+  }>;
+}
+
+export interface NFT {
+  tokenId: string;
+  contractAddress: string;
+  metadata?: NFTMetadata;
+  loading: boolean;
+  error?: string;
+}
+
+export function NFTViewer() {
+  const { address, isConnected } = useAccount();
+  const [nfts, setNfts] = useState<NFT[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [selectedNft, setSelectedNft] = useState<NFT | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [contracts, setContracts] = useState<string[]>([]);
+  const [selectedContract, setSelectedContract] = useState<string>('all');
+  const observerRef = useRef<IntersectionObserver | null>(null);
+  const loadingRef = useRef<HTMLDivElement>(null);
+
+  // 加载用户的NFT
+  const loadNFTs = async () => {
+    if (!isConnected || !address) return;
+    
+    setLoading(true);
+    setNfts([]);
+    const nftContracts = await findNFTContracts(address);
+    setContracts(nftContracts);
+    
+    for (const contractAddress of nftContracts) {
+      try {
+        const contractNfts = await fetchNFTsFromContract(contractAddress, address);
+        setNfts(prev => [...prev, ...contractNfts]);
+      } catch (err) {
+        console.error(`从合约 ${contractAddress} 加载NFT失败:`, err);
+      }
+    }
+    
+    setLoading(false);
+  };
+
+  // 查找用户持有的NFT合约
+  const findNFTContracts = async (owner: string): Promise<string[]> => {
+    // 这里使用模拟数据，实际项目中应使用The Graph等服务或NFT聚合API
+    // 如OpenSea API, Alchemy NFT API等
+    return [
+      '0x86171f4e2f240189B2b5E932991a036559356c82', // Goerli上的一个测试NFT合约
+      '0x76be3b62873462d2142405439777e971754e8e77', // Goerli上的另一个测试NFT合约
+    ];
+  };
+
+  // 从单个合约获取NFT
+  const fetchNFTsFromContract = async (contractAddress: string, owner: string): Promise<NFT[]> => {
+    const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL);
+    const contract = new ethers.Contract(contractAddress, erc721ABI, provider);
+    
+    const balance = await contract.balanceOf(owner);
+    const nftPromises: Promise<NFT>[] = [];
+    
+    for (let i = 0; i < Math.min(50, balance); i++) { // 限制数量以避免过多请求
+      nftPromises.push((async () => {
+        try {
+          const tokenId = await contract.tokenOfOwnerByIndex(owner, i);
+          return {
+            tokenId: tokenId.toString(),
+            contractAddress,
+            loading: true
+          };
+        } catch (err) {
+          return {
+            tokenId: 'unknown',
+            contractAddress,
+            loading: false,
+            error: '获取Token ID失败'
+          };
+        }
+      })());
+    }
+    
+    return Promise.all(nftPromises);
+  };
+
+  // 加载NFT元数据
+  const loadNFTMetadata = async (nft: NFT) => {
+    try {
+      const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL);
+      const contract = new ethers.Contract(nft.contractAddress, erc721ABI, provider);
+      const tokenURI = await contract.tokenURI(nft.tokenId);
+      
+      const resolvedUrl = resolveIPFSUrl(tokenURI);
+      const response = await fetch(resolvedUrl);
+      const metadata = await response.json();
+      
+      setNfts(prev => prev.map(item => 
+        item.contractAddress === nft.contractAddress && item.tokenId === nft.tokenId
+          ? { ...item, metadata, loading: false }
+          : item
+      ));
+    } catch (err) {
+      console.error(`加载NFT ${nft.tokenId} 元数据失败:`, err);
+      setNfts(prev => prev.map(item => 
+        item.contractAddress === nft.contractAddress && item.tokenId === nft.tokenId
+          ? { ...item, error: '加载元数据失败', loading: false }
+          : item
+      ));
+    }
+  };
+
+  // 使用Intersection Observer实现懒加载
+  useEffect(() => {
+    observerRef.current = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          const nftElement = entry.target as HTMLElement;
+          const contractAddress = nftElement.getAttribute('data-contract');
+          const tokenId = nftElement.getAttribute('data-token-id');
+          
+          if (contractAddress && tokenId) {
+            const nft = nfts.find(
+              n => n.contractAddress === contractAddress && n.tokenId === tokenId && n.loading
+            );
+            if (nft) {
+              loadNFTMetadata(nft);
+            }
+          }
+        }
+      });
+    }, { threshold: 0.1 });
+
+    return () => {
+      observerRef.current?.disconnect();
+    };
+  }, [nfts]);
+
+  // 注册/注销观察元素
+  useEffect(() => {
+    const nftElements = document.querySelectorAll('.nft-item[data-contract][data-token-id]');
+    nftElements.forEach(element => {
+      observerRef.current?.observe(element);
+    });
+
+    return () => {
+      nftElements.forEach(element => {
+        observerRef.current?.unobserve(element);
+      });
+    };
+  }, [nfts.map(n => `${n.contractAddress}-${n.tokenId}`).join(',')]);
+
+  // 初始加载
+  useEffect(() => {
+    if (isConnected) {
+      loadNFTs();
+    }
+  }, [isConnected, address]);
+
+  // 过滤NFT
+  const filteredNfts = selectedContract === 'all' 
+    ? nfts 
+    : nfts.filter(nft => nft.contractAddress === selectedContract);
+
+  if (!isConnected) {
+    return (
+      <div className="p-6 bg-dark rounded-lg border border-gray-800 text-center">
+        <p className="text-yellow-400">请先连接钱包</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-6 bg-dark rounded-lg border border-gray-800 space-y-6">
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold text-light">NFT查看器</h2>
+        <button
+          className="px-4 py-2 bg-primary hover:bg-primary/80 text-white rounded-lg transition duration-300"
+          onClick={loadNFTs}
+          disabled={loading}
+        >
+          {loading ? '加载中...' : '刷新NFT'}
+        </button>
+      </div>
+
+      {/* 合约过滤器 */}
+      {contracts.length > 0 && (
+        <div className="space-y-2">
+          <label className="text-light">筛选合约</label>
+          <select
+            className="w-full p-3 bg-gray-900 text-light border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+            value={selectedContract}
+            onChange={(e) => setSelectedContract(e.target.value)}
+          >
+            <option value="all">所有合约</option>
+            {contracts.map(contract => (
+              <option key={contract} value={contract}>{contract.slice(0, 6)}...{contract.slice(-4)}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* NFT网格 */}
+      {filteredNfts.length > 0 ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          {filteredNfts.map((nft) => (
+            <div
+              key={`${nft.contractAddress}-${nft.tokenId}`}
+              className="nft-item bg-gray-900 rounded-lg overflow-hidden cursor-pointer hover:shadow-lg transition-shadow duration-300 border border-gray-800"
+              data-contract={nft.contractAddress}
+              data-token-id={nft.tokenId}
+              onClick={() => {
+                setSelectedNft(nft);
+                setIsModalOpen(true);
+              }}
+            >
+              <div className="aspect-square bg-gray-800 relative">
+                {nft.loading ? (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+                  </div>
+                ) : nft.error ? (
+                  <div className="absolute inset-0 flex items-center justify-center text-red-400">
+                    无法加载
+                  </div>
+                ) : nft.metadata?.image ? (
+                  <img
+                    src={resolveIPFSUrl(nft.metadata.image)}
+                    alt={nft.metadata.name || `NFT #${nft.tokenId}`}
+                    className="w-full h-full object-cover"
+                    loading="lazy"
+                  />
+                ) : (
+                  <div className="absolute inset-0 flex items-center justify-center text-gray-500">
+                    无图像
+                  </div>
+                )}
+              </div>
+              <div className="p-4">
+                <h3 className="font-bold text-white truncate">
+                  {nft.metadata?.name || `NFT #${nft.tokenId}`}
+                </h3>
+                <p className="text-gray-400 text-sm mt-1 truncate">
+                  {nft.contractAddress.slice(0, 6)}...{nft.contractAddress.slice(-4)}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="text-center py-12 text-gray-400">
+          {loading ? '正在加载NFT...' : '没有找到NFT'}
+        </div>
+      )}
+
+      {/* NFT详情模态框 */}
+      {isModalOpen && selectedNft && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+          <div className="bg-gray-900 rounded-lg max-w-3xl w-full max-h-[90vh] overflow-auto">
+            <div className="p-4 border-b border-gray-800 flex justify-between items-center">
+              <h3 className="text-xl font-bold text-white">
+                {selectedNft.metadata?.name || `NFT #${selectedNft.tokenId}`}
+              </h3>
+              <button
+                className="text-gray-400 hover:text-white"
+                onClick={() => setIsModalOpen(false)}
+              >
+                ✕
+              </button>
+            </div>
+            
+            <div className="p-6">
+              <div className="mb-6 aspect-video bg-gray-800 relative">
+                {selectedNft.loading ? (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+                  </div>
+                ) : selectedNft.error ? (
+                  <div className="absolute inset-0 flex items-center justify-center text-red-400">
+                    无法加载图像
+                  </div>
+                ) : selectedNft.metadata?.image ? (
+                  <img
+                    src={resolveIPFSUrl(selectedNft.metadata.image)}
+                    alt={selectedNft.metadata.name}
+                    className="w-full h-full object-contain"
+                  />
+                ) : null}
+              </div>
+              
+              <div className="space-y-4">
+                {selectedNft.metadata?.description && (
+                  <p className="text-gray-300">{selectedNft.metadata.description}</p>
+                )}
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-gray-800 p-3 rounded-lg">
+                    <p className="text-gray-400 text-sm">合约地址</p>
+                    <p className="text-primary font-mono break-all">{selectedNft.contractAddress}</p>
+                  </div>
+                  <div className="bg-gray-800 p-3 rounded-lg">
+                    <p className="text-gray-400 text-sm">Token ID</p>
+                    <p className="text-white font-mono">{selectedNft.tokenId}</p>
+                  </div>
+                </div>
+                
+                {selectedNft.metadata?.attributes && selectedNft.metadata.attributes.length > 0 && (
+                  <div>
+                    <h4 className="text-white font-bold mb-2">属性</h4>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      {selectedNft.metadata.attributes.map((attr, index) => (
+                        <div key={index} className="bg-gray-800 p-2 rounded text-sm">
+                          <p className="text-gray-400">{attr.trait_type}</p>
+                          <p className="text-white font-medium">{attr.value}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 无限滚动加载指示器 */}
+      <div ref={loadingRef} className="h-4 mt-4"></div>
+    </div>
+  );
+}
+
+## 开发环境配置
+
+### 1. 项目初始化命令示例
+```bash
+# 创建Next.js项目
+npx create-next-app@latest web3-dapp-tutorial --typescript --tailwind --eslint
+
+# 进入项目目录
+cd web3-dapp-tutorial
+```
+
+### 2. 关键依赖安装清单
+```bash
+# 安装Web3核心依赖
+npm install ethers@6.15.0 wagmi@2.18.1 rainbowkit@2.2.9 viem@2.38.3
+
+# 安装状态管理
+npm install zustand@5.0.8
+
+# 安装其他工具库
+npm install @tanstack/react-query
+```
+
+### 3. Tailwind CSS配置要点
+在`tailwind.config.ts`中添加以下配置：
+```typescript
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: [
+    './app/**/*.{js,ts,jsx,tsx,mdx}',
+    './pages/**/*.{js,ts,jsx,tsx,mdx}',
+    './components/**/*.{js,ts,jsx,tsx,mdx}',
+  ],
+  theme: {
+    extend: {
+      colors: {
+        primary: '#6366F1', // Web3常见的靛蓝色
+        secondary: '#10B981', // 辅助绿色
+        dark: '#111827',
+        light: '#F9FAFB',
+      },
+      fontFamily: {
+        sans: ['Inter', 'system-ui', 'sans-serif'],
+      },
+    },
+  },
+  plugins: [],
+}
+```
+
+### 4. 环境变量配置
+
+在项目根目录创建`.env.local`文件，添加必要的环境变量：
+
+```env
+# RPC节点URL（可从Infura、Alchemy等获取）
+NEXT_PUBLIC_RPC_URL=https://goerli.infura.io/v3/YOUR_INFURA_KEY
+
+# WalletConnect项目ID（从https://cloud.walletconnect.com获取）
+NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=YOUR_PROJECT_ID
+
+# 应用链ID（以Goerli测试网为例）
+NEXT_PUBLIC_CHAIN_ID=5
+```
+
+**注意**: 请确保将`.env.local`添加到`.gitignore`文件中，避免泄露敏感信息。
+
+### 4. Wagmi与RainbowKit初始化代码模板
+在`app/providers.tsx`中设置Web3提供者：
+```tsx
+'use client';
+
+import {
+  RainbowKitProvider,
+  darkTheme,
+  lightTheme,
+  getDefaultConfig,
+} from '@rainbow-me/rainbowkit';
+import { WagmiProvider } from 'wagmi';
+import { mainnet, goerli, sepolia } from 'wagmi/chains';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
+
+// 创建Query客户端
+const queryClient = new QueryClient();
+
+// 配置Wagmi客户端
+const config = getDefaultConfig({
+  appName: 'Web3 DApp Tutorial',
+  projectId: 'YOUR_PROJECT_ID', // 从WalletConnect获取
+  chains: [mainnet, goerli, sepolia],
+  ssr: true,
+});
+
+export function Web3Providers({ children }: { children: React.ReactNode }) {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) {
+    return null;
+  }
+
+  return (
+    <WagmiProvider config={config}>
+      <QueryClientProvider client={queryClient}>
+        <RainbowKitProvider
+          theme={darkTheme()}
+          initialChain={goerli}
+        >
+          {children}
+        </RainbowKitProvider>
+      </QueryClientProvider>
+    </WagmiProvider>
+  );
+}
+```
+
+在`app/layout.tsx`中集成提供者：
+```tsx
+import { Web3Providers } from './providers';
+import '@rainbow-me/rainbowkit/styles.css';
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <html lang="zh-CN">
+      <body>
+        <Web3Providers>{children}</Web3Providers>
+      </body>
+    </html>
+  );
+}
+```
+
+## 部署与测试建议
+
+### 本地测试网络配置
+1. 在MetaMask中添加测试网络（Goerli或Sepolia）
+2. 获取测试网络ETH：
+   - Goerli: https://goerlifaucet.com/
+   - Sepolia: https://sepoliafaucet.com/
+3. 本地开发服务器启动：
+   ```bash
+   npm run dev
+   ```
+
+### Vercel部署流程
+1. 将项目推送到GitHub仓库
+2. 登录Vercel，选择导入GitHub仓库
+3. 配置环境变量（在Vercel项目设置中的Environment Variables部分）
+   - 添加`NEXT_PUBLIC_RPC_URL`
+   - 添加`NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID`
+   - 添加`NEXT_PUBLIC_CHAIN_ID`
+4. 点击部署，等待构建完成
+5. 访问分配的域名查看部署结果
+
+### 常见问题排查指南
+
+#### 钱包连接问题
+- 确保MetaMask已安装并解锁
+- 检查网络连接状态
+- 确认项目ID正确配置
+- 验证chainId是否与配置的网络匹配
+
+#### 交易失败问题
+- 检查Gas费用是否充足
+- 确认交易参数正确
+- 查看控制台错误日志
+- 确保合约地址正确且在当前网络可用
+
+#### NFT加载缓慢
+- 使用IPFS网关缓存
+- 实现图片懒加载
+- 优化元数据请求频率
+- 考虑使用批量查询减少API调用
+
+## 安全最佳实践
+
+### 前端安全措施
+1. **输入验证**：始终验证用户输入的地址格式，防止注入攻击
+2. **最小权限原则**：限制代币授权额度，避免无限授权风险
+3. **交易确认**：显示详细的交易参数供用户确认，包含金额、地址和Gas费用
+4. **签名验证**：使用签名消息验证用户身份，避免私钥泄露
+5. **状态管理安全**：避免在前端存储敏感信息，使用加密存储必要数据
+
+### 智能合约交互安全
+1. **合约地址验证**：硬编码已知合约地址并在运行时验证
+2. **事件监听**：通过事件确认交易成功而非仅依赖交易哈希
+3. **错误处理**：完善的错误捕获和用户友好的错误提示
+4. **Gas优化**：监控并优化交易的Gas使用，避免高Gas费用
+
+### 网络安全考虑
+1. **HTTPS强制**：确保应用通过HTTPS提供服务
+2. **内容安全策略**：实现严格的CSP防止XSS攻击
+3. **RPC节点保护**：使用付费RPC服务并保护API密钥
+4. **依赖审计**：定期更新和审计第三方依赖，避免已知漏洞
+
+## 性能优化建议
+
+1. **代码分割**：使用Next.js的自动代码分割功能，减小初始加载体积
+2. **缓存策略**：对频繁访问的数据实现智能缓存
+3. **图像优化**：使用响应式图像和WebP格式，实现渐进式加载
+4. **请求批处理**：合并多个链上请求，减少网络往返
+5. **懒加载组件**：对NFT等重量级组件实现按需加载
+6. **状态管理优化**：避免不必要的重渲染，使用memo和useCallback优化组件性能
+
+## 项目扩展方向
+
+1. **多链支持**：扩展应用以支持多个区块链网络
+2. **DeFi功能**：集成简单的DeFi功能如质押、流动性提供
+3. **社交功能**：添加NFT分享、评论等社交元素
+4. **移动适配**：确保在移动设备上有良好的用户体验
+5. **链下数据集成**：结合链下数据增强应用功能
+6. **钱包适配**：优化对不同钱包的支持，包括移动钱包
+
+通过本教程，您已经学习了如何构建一个功能完整的Web3 DApp，包括钱包连接、代币转账和NFT查看功能。这些基础功能为您进一步开发复杂的去中心化应用奠定了坚实的基础。随着区块链技术的不断发展，您可以继续探索更多高级功能和最佳实践，为用户提供更加安全、高效和友好的Web3体验。

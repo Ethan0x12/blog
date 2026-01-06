@@ -1,0 +1,1592 @@
+---
+title: Web3进阶级项目实战指南：从Swap应用到DAO治理系统
+publishedAt: 2025-10-27
+summary: 本文档详细介绍三个Web3进阶级项目的实现方案，包括基于Next.js和Ethers.js的代币交换应用、NFT铸造平台和DAO投票系统，涵盖技术选型、核心功能实现、关键代码和最佳实践。
+tags:
+  - web3
+  - nextjs
+  - ethersjs
+  - swap
+  - nft
+  - dao
+---
+
+# Web3进阶级项目实战指南
+
+## 项目背景
+
+随着区块链技术的成熟和DeFi生态的发展，构建高性能、用户友好且安全的Web3应用成为开发者的重要挑战。本文档将详细介绍三个进阶级Web3项目的实现方案，涵盖从基础架构到核心功能的完整开发流程，并提供关键代码示例和最佳实践。
+
+## 技术选型
+
+### 推荐技术栈
+
+- **Next.js 16.0.0**：提供SSR/SSG能力，优化SEO和首屏加载性能
+- **React 19.2.0**：利用最新React特性，实现高效UI渲染
+- **Tailwind CSS 4.0.0**：快速构建响应式、美观的用户界面
+- **Ethers 6.15.0**：与以太坊区块链交互的核心库
+- **Wagmi 2.18.1**：React Hooks库，简化Web3交互逻辑
+- **@rainbow-me/rainbowkit 2.2.9**：提供优雅的钱包连接UI和交互体验
+- **Viem 2.38.3**：轻量级以太坊接口库，与Wagmi配合使用
+- **Zustand 5.0.8**：轻量级状态管理库，管理应用状态
+
+### 技术选型理由
+
+1. **Next.js + React**：提供现代React应用开发的最佳实践，支持SSR/SSG以提升SEO和性能
+2. **Tailwind CSS**：减少CSS编写时间，提供一致的设计系统
+3. **Ethers.js + Wagmi**：成熟的以太坊交互方案，Wagmi提供了React Hooks简化开发
+4. **RainbowKit**：提供专业级钱包连接体验，支持多种钱包
+5. **Zustand**：相比Redux更轻量，API更简洁，适合Web3应用的状态管理
+
+## 项目一：简易Swap应用
+
+### 项目概述
+
+构建一个去中心化代币交换应用，支持用户使用不同的ERC-20代币进行兑换。应用需要提供实时价格数据、滑点控制、交易确认等功能，确保用户交易体验流畅且安全。
+
+### 核心功能设计
+
+1. **代币选择器**：支持用户选择输入和输出代币
+2. **价格计算器**：基于流动性池实时计算兑换价格
+3. **交易滑点控制**：允许用户设置最大滑点容忍度
+4. **交易确认流程**：提供清晰的交易预览和确认界面
+5. **交易历史记录**：显示用户的历史交易记录
+
+### 技术实现
+
+#### 1. 项目初始化
+
+```bash
+npx create-next-app@latest web3-swap-app
+cd web3-swap-app
+npm install ethers@6.15.0 wagmi@2.18.1 @rainbow-me/rainbowkit@2.2.9 viem@2.38.3 zustand@5.0.8
+npm install tailwindcss@4.0.0 postcss autoprefixer
+npx tailwindcss init -p
+```
+
+#### 2. 配置Wagmi和RainbowKit
+
+创建`lib/web3.ts`文件：
+
+```typescript
+import { getDefaultConfig } from '@rainbow-me/rainbowkit';
+import { mainnet, sepolia } from 'wagmi/chains';
+
+export const config = getDefaultConfig({
+  appName: 'Web3 Swap App',
+  projectId: 'your-wallet-connect-project-id',
+  chains: [mainnet, sepolia],
+  ssr: true,
+});
+```
+
+在`app/layout.tsx`中配置：
+
+```tsx
+import { WagmiProvider } from 'wagmi';
+import { RainbowKitProvider } from '@rainbow-me/rainbowkit';
+import { config } from '@/lib/web3';
+import '@rainbow-me/rainbowkit/styles.css';
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <html lang="en">
+      <body>
+        <WagmiProvider config={config}>
+          <RainbowKitProvider>
+            {children}
+          </RainbowKitProvider>
+        </WagmiProvider>
+      </body>
+    </html>
+  );
+}
+```
+
+#### 3. 状态管理 (使用Zustand)
+
+创建`store/swapStore.ts`：
+
+```typescript
+import { create } from 'zustand';
+import { Address } from 'viem';
+
+interface Token {
+  address: Address;
+  symbol: string;
+  decimals: number;
+  logoURI?: string;
+}
+
+interface SwapStore {
+  inputToken: Token | null;
+  outputToken: Token | null;
+  inputAmount: string;
+  outputAmount: string;
+  slippage: number;
+  setInputToken: (token: Token) => void;
+  setOutputToken: (token: Token) => void;
+  setInputAmount: (amount: string) => void;
+  setOutputAmount: (amount: string) => void;
+  setSlippage: (value: number) => void;
+  swapTokens: () => void;
+}
+
+export const useSwapStore = create<SwapStore>((set, get) => ({
+  inputToken: null,
+  outputToken: null,
+  inputAmount: '',
+  outputAmount: '',
+  slippage: 0.5,
+  setInputToken: (token) => set({ inputToken: token }),
+  setOutputToken: (token) => set({ outputToken: token }),
+  setInputAmount: (amount) => set({ inputAmount: amount }),
+  setOutputAmount: (amount) => set({ outputAmount: amount }),
+  setSlippage: (value) => set({ slippage: value }),
+  swapTokens: () => {
+    const { inputToken, outputToken } = get();
+    set({ inputToken: outputToken, outputToken: inputToken });
+  },
+}));
+```
+
+#### 4. Swap组件实现
+
+创建`components/Swap/SwapForm.tsx`：
+
+```tsx
+'use client';
+import { useState, useEffect } from 'react';
+import { useAccount, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useSwapStore } from '@/store/swapStore';
+import { ethers } from 'ethers';
+import { SwapIcon, ArrowDownIcon } from '@heroicons/react/24/outline';
+
+// DEX合约ABI (简化版)
+const dexRouterAbi = [
+  'function swapExactTokensForTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)',
+  'function getAmountsOut(uint amountIn, address[] calldata path) public view returns (uint[] memory amounts)'
+];
+
+// DEX路由器地址 (示例使用Uniswap V2)
+const routerAddress = '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D';
+
+interface TokenInfo {
+  address: string;
+  symbol: string;
+  decimals: number;
+}
+
+const SwapForm: React.FC = () => {
+  const { address } = useAccount();
+  const {
+    inputToken,
+    outputToken,
+    inputAmount,
+    outputAmount,
+    slippage,
+    setInputAmount,
+    setOutputAmount,
+    swapTokens,
+  } = useSwapStore();
+  
+  const [isCalculating, setIsCalculating] = useState(false);
+  const [error, setError] = useState('');
+
+  // 计算兑换金额
+  const calculateOutputAmount = async () => {
+    if (!inputToken || !outputToken || !inputAmount || parseFloat(inputAmount) <= 0) return;
+    
+    setIsCalculating(true);
+    try {
+      const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL);
+      const routerContract = new ethers.Contract(routerAddress, dexRouterAbi, provider);
+      
+      const amountIn = ethers.parseUnits(inputAmount, inputToken.decimals);
+      const path = [inputToken.address, outputToken.address];
+      
+      const amounts = await routerContract.getAmountsOut(amountIn, path);
+      const outputDecimals = outputToken.decimals;
+      const calculatedOutput = ethers.formatUnits(amounts[1], outputDecimals);
+      
+      setOutputAmount(calculatedOutput);
+      setError('');
+    } catch (err) {
+      setError('无法计算兑换金额，请检查网络连接或尝试刷新页面');
+      console.error('计算金额错误:', err);
+    } finally {
+      setIsCalculating(false);
+    }
+  };
+
+  // 当输入代币、输出代币或输入金额改变时重新计算
+  useEffect(() => {
+    calculateOutputAmount();
+  }, [inputToken, outputToken, inputAmount]);
+
+  // 准备合约交易参数
+  const amountIn = inputToken ? ethers.parseUnits(inputAmount, inputToken.decimals) : 0n;
+  const minAmountOut = outputToken ? 
+    ethers.parseUnits((parseFloat(outputAmount) * (1 - slippage / 100)).toString(), outputToken.decimals) : 
+    0n;
+  const path = inputToken && outputToken ? [inputToken.address, outputToken.address] : [];
+  const deadline = Math.floor(Date.now() / 1000) + 60 * 20; // 20分钟后过期
+
+  // 使用Wagmi v2的useWriteContract钩子
+  const {
+    writeContract,
+    data: transactionHash,
+    isPending: isSwapPending,
+    isError: isTransactionError,
+    error: transactionError,
+  } = useWriteContract({
+    address: routerAddress as `0x${string}`,
+    abi: dexRouterAbi,
+    functionName: 'swapExactTokensForTokens',
+  });
+
+  // 使用useWaitForTransactionReceipt等待交易完成
+  const {
+    isLoading: isTransactionLoading,
+    isSuccess: isTransactionSuccess,
+    receipt
+  } = useWaitForTransactionReceipt({ 
+    hash: transactionHash,
+    query: {
+      enabled: !!transactionHash,
+    }
+  });
+
+  const handleSwap = async () => {
+    if (!address || !inputToken || !outputToken || parseFloat(inputAmount) <= 0) return;
+    
+    try {
+      await writeContract({
+        args: [amountIn, minAmountOut, path, address, deadline],
+      });
+    } catch (err) {
+      setError('交易失败，请稍后再试');
+      console.error('交易失败:', err);
+    }
+  };
+
+  // 显示错误信息
+  useEffect(() => {
+    if (isTransactionError && transactionError) {
+      setError(`交易执行失败: ${transactionError.message}`);
+    } else if (isTransactionSuccess) {
+      setInputAmount('');
+      setOutputAmount('');
+    }
+  }, [isTransactionError, transactionError, isTransactionSuccess]);
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 max-w-md mx-auto">
+      <h2 className="text-2xl font-bold mb-6 text-center text-gray-900 dark:text-white">代币交换</h2>
+      
+      {error && (
+        <div className="bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 p-3 rounded-lg mb-4">
+          {error}
+        </div>
+      )}
+
+      {/* 输入代币部分 */}
+      <div className="mb-4">
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+          输入代币
+        </label>
+        <div className="flex items-center border rounded-lg overflow-hidden">
+          <input
+            type="text"
+            className="flex-1 p-3 border-r focus:outline-none"
+            value={inputAmount}
+            onChange={(e) => setInputAmount(e.target.value)}
+            placeholder="输入金额"
+          />
+          <div className="p-3 bg-gray-50 dark:bg-gray-700 min-w-[100px] text-center">
+            {inputToken ? inputToken.symbol : '选择代币'}
+          </div>
+        </div>
+      </div>
+
+      {/* 交换按钮 */}
+      <div className="flex justify-center mb-4">
+        <button
+          onClick={swapTokens}
+          className="w-10 h-10 rounded-full bg-blue-500 text-white flex items-center justify-center hover:bg-blue-600 transition-colors"
+        >
+          <SwapIcon size={20} />
+        </button>
+      </div>
+
+      {/* 输出代币部分 */}
+      <div className="mb-6">
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+          输出代币
+        </label>
+        <div className="flex items-center border rounded-lg overflow-hidden">
+          <input
+            type="text"
+            className="flex-1 p-3 border-r focus:outline-none"
+            value={outputAmount}
+            readOnly
+            placeholder="兑换金额"
+          />
+          <div className="p-3 bg-gray-50 dark:bg-gray-700 min-w-[100px] text-center">
+            {outputToken ? outputToken.symbol : '选择代币'}
+          </div>
+        </div>
+        {isCalculating && <p className="text-xs text-gray-500 mt-1">计算中...</p>}
+      </div>
+
+      {/* 滑点设置 */}
+      <div className="mb-6">
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+          滑点容忍度: {slippage}%
+        </label>
+        <input
+          type="range"
+          min="0.1"
+          max="5"
+          step="0.1"
+          className="w-full"
+          value={slippage}
+          onChange={(e) => setSlippage(parseFloat(e.target.value))}
+        />
+      </div>
+
+      {/* 交换按钮 */}
+      <button
+        onClick={handleSwap}
+        disabled={!address || !inputToken || !outputToken || parseFloat(inputAmount) <= 0 || isSwapPending || isTransactionLoading}
+        className={`w-full py-3 rounded-lg text-white transition-colors ${(
+          !address || !inputToken || !outputToken || parseFloat(inputAmount) <= 0
+        ) ? 'bg-gray-300 cursor-not-allowed' : 'bg-blue-500 hover:bg-blue-600'}`}
+      >
+        {isSwapPending || isTransactionLoading ? (
+          <span className="flex items-center justify-center">
+            <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            处理中...
+          </span>
+        ) : (
+          '兑换'
+        )}
+      </button>
+    </div>
+  );
+};
+
+export default SwapForm;
+```
+
+#### 5. 安全最佳实践
+
+1. **交易参数验证**：确保输入金额有效，设置滑点限制
+2. **交易预览**：在确认前向用户展示完整的交易详情
+3. **Gas费用提示**：提供Gas费用预估和优化选项
+4. **错误处理**：优雅处理各类交易异常，提供明确的错误信息
+5. **合约地址验证**：确保与正确的DEX合约交互
+
+### 测试要点
+
+1. **钱包连接**：测试不同钱包的连接流程
+2. **代币选择**：验证代币选择器功能正常
+3. **价格计算**：测试价格计算准确性
+4. **交易执行**：在测试网进行完整的交易流程测试
+5. **错误场景**：测试网络中断、用户拒绝交易等异常情况
+
+## 项目二：NFT铸造平台
+
+### 项目概述
+
+构建一个用户友好的NFT创建与铸造平台，允许创作者上传数字艺术品、设置元数据并铸造为NFT。平台需支持自定义属性、批量铸造和二级市场链接。
+
+### 核心功能设计
+
+1. **NFT元数据管理**：允许用户设置名称、描述、上传媒体文件
+2. **属性编辑器**：支持添加自定义NFT属性（如稀有度、类型等）
+3. **铸造配置**：设置铸造数量、价格和权限
+4. **铸造流程**：完整的钱包授权和链上铸造流程
+5. **铸造历史**：查看用户铸造的NFT
+
+### 技术实现
+
+#### 1. IPFS集成（用于存储NFT元数据）
+
+```typescript
+// lib/ipfs.ts
+import { create } from 'ipfs-http-client';
+
+// 创建IPFS客户端（使用Infura IPFS作为示例）
+const ipfsClient = create({
+  url: 'https://ipfs.infura.io:5001/api/v0',
+  headers: {
+    authorization: `Basic ${Buffer.from(
+      `${process.env.NEXT_PUBLIC_INFURA_IPFS_PROJECT_ID}:${process.env.NEXT_PUBLIC_INFURA_IPFS_PROJECT_SECRET}`
+    ).toString('base64')}`,
+  },
+});
+
+export const uploadToIPFS = async (file: File): Promise<string> => {
+  try {
+    const added = await ipfsClient.add(file);
+    return `https://ipfs.io/ipfs/${added.path}`;
+  } catch (error) {
+    console.error('IPFS上传失败:', error);
+    throw new Error('无法上传文件到IPFS');
+  }
+};
+
+export const uploadMetadataToIPFS = async (metadata: any): Promise<string> => {
+  try {
+    const added = await ipfsClient.add(JSON.stringify(metadata));
+    return `https://ipfs.io/ipfs/${added.path}`;
+  } catch (error) {
+    console.error('IPFS元数据上传失败:', error);
+    throw new Error('无法上传元数据到IPFS');
+  }
+};
+```
+
+#### 2. NFT元数据编辑器组件
+
+```tsx
+// components/NFT/MetadataEditor.tsx
+'use client';
+import { useState } from 'react';
+import { uploadToIPFS, uploadMetadataToIPFS } from '@/lib/ipfs';
+
+interface Attribute {
+  trait_type: string;
+  value: string;
+}
+
+interface MetadataFormData {
+  name: string;
+  description: string;
+  file: File | null;
+  attributes: Attribute[];
+}
+
+const MetadataEditor: React.FC<{
+  onMetadataComplete: (metadataUri: string) => void;
+}> = ({ onMetadataComplete }) => {
+  const [formData, setFormData] = useState<MetadataFormData>({
+    name: '',
+    description: '',
+    file: null,
+    attributes: [{ trait_type: '', value: '' }],
+  });
+  const [isUploading, setIsUploading] = useState(false);
+  const [error, setError] = useState('');
+  const [imagePreview, setImagePreview] = useState<string>('');
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      setFormData((prev) => ({ ...prev, file }));
+      
+      // 创建图片预览
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImagePreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleAttributeChange = (index: number, field: keyof Attribute, value: string) => {
+    setFormData((prev) => {
+      const newAttributes = [...prev.attributes];
+      newAttributes[index] = { ...newAttributes[index], [field]: value };
+      return { ...prev, attributes: newAttributes };
+    });
+  };
+
+  const addAttribute = () => {
+    setFormData((prev) => ({
+      ...prev,
+      attributes: [...prev.attributes, { trait_type: '', value: '' }],
+    }));
+  };
+
+  const removeAttribute = (index: number) => {
+    if (formData.attributes.length > 1) {
+      setFormData((prev) => {
+        const newAttributes = prev.attributes.filter((_, i) => i !== index);
+        return { ...prev, attributes: newAttributes };
+      });
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    // 表单验证
+    if (!formData.name || !formData.description || !formData.file) {
+      setError('请填写所有必填字段');
+      return;
+    }
+    
+    // 验证所有属性都有值
+    const hasEmptyAttribute = formData.attributes.some(
+      attr => !attr.trait_type.trim() || !attr.value.trim()
+    );
+    
+    if (hasEmptyAttribute) {
+      setError('请填写所有属性字段');
+      return;
+    }
+    
+    setIsUploading(true);
+    setError('');
+    
+    try {
+      // 上传文件到IPFS
+      const imageUri = await uploadToIPFS(formData.file);
+      
+      // 准备元数据
+      const metadata = {
+        name: formData.name,
+        description: formData.description,
+        image: imageUri,
+        attributes: formData.attributes,
+      };
+      
+      // 上传元数据到IPFS
+      const metadataUri = await uploadMetadataToIPFS(metadata);
+      
+      // 调用回调函数，传递元数据URI
+      onMetadataComplete(metadataUri);
+    } catch (err) {
+      console.error('上传失败:', err);
+      setError('上传失败，请稍后再试');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 mb-6">
+      <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">NFT元数据编辑</h2>
+      
+      {error && (
+        <div className="bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 p-3 rounded-lg mb-4">
+          {error}
+        </div>
+      )}
+      
+      <form onSubmit={handleSubmit}>
+        {/* 名称输入 */}
+        <div className="mb-4">
+          <label htmlFor="name" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            NFT名称 *
+          </label>
+          <input
+            type="text"
+            id="name"
+            name="name"
+            value={formData.name}
+            onChange={handleInputChange}
+            className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            placeholder="输入NFT名称"
+            required
+          />
+        </div>
+        
+        {/* 描述输入 */}
+        <div className="mb-4">
+          <label htmlFor="description" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            描述 *
+          </label>
+          <textarea
+            id="description"
+            name="description"
+            value={formData.description}
+            onChange={handleInputChange}
+            className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 h-32"
+            placeholder="描述你的NFT..."
+            required
+          />
+        </div>
+        
+        {/* 文件上传 */}
+        <div className="mb-4">
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            上传图片 *
+          </label>
+          <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-4 text-center hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleFileChange}
+              className="hidden"
+              id="file-upload"
+              required
+            />
+            <label htmlFor="file-upload" className="cursor-pointer">
+              {imagePreview ? (
+                <img src={imagePreview} alt="预览" className="max-h-40 mx-auto rounded-md" />
+              ) : (
+                <div>
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-gray-400 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                  <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">拖放图片到此处或点击上传</p>
+                </div>
+              )}
+            </label>
+          </div>
+        </div>
+        
+        {/* 属性编辑 */}
+        <div className="mb-6">
+          <div className="flex justify-between items-center mb-2">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+              属性
+            </label>
+            <button
+              type="button"
+              onClick={addAttribute}
+              className="text-sm bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded"
+            >
+              添加属性
+            </button>
+          </div>
+          
+          {formData.attributes.map((attribute, index) => (
+            <div key={index} className="flex space-x-2 mb-2">
+              <input
+                type="text"
+                placeholder="特性类型"
+                value={attribute.trait_type}
+                onChange={(e) => handleAttributeChange(index, 'trait_type', e.target.value)}
+                className="flex-1 p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <input
+                type="text"
+                placeholder="特性值"
+                value={attribute.value}
+                onChange={(e) => handleAttributeChange(index, 'value', e.target.value)}
+                className="flex-1 p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <button
+                type="button"
+                onClick={() => removeAttribute(index)}
+                className="p-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+                disabled={formData.attributes.length <= 1}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+        
+        {/* 提交按钮 */}
+        <button
+          type="submit"
+          disabled={isSubmitting}
+          className={`w-full py-3 rounded-lg transition-colors ${isSubmitting ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-500 hover:bg-blue-600 text-white'}`}
+        >
+          {isSubmitting ? '创建中...' : '创建提案'}
+        </button>
+      </form>
+    </div>
+  );
+};
+
+export default CreateProposal;
+```
+
+### 安全最佳实践
+
+1. **提案权限控制**：可以设置创建提案所需的最小代币持有量
+2. **投票权重验证**：确保基于真实代币持有量计算投票权重
+3. **时间锁机制**：为提案执行设置时间锁，提供足够的社区响应时间
+4. **投票唯一性**：确保每个地址对每个提案只能投票一次
+5. **交易确认流程**：提供清晰的交易预览和确认步骤
+
+### 测试要点
+
+1. **提案创建**：测试创建不同类型的提案
+2. **投票功能**：测试不同权重的投票效果
+3. **时间限制**：验证提案的开始和结束时间限制
+4. **结果计算**：测试投票结果的计算准确性
+5. **错误场景**：测试重复投票、过期提案投票等异常情况
+
+## 部署指南
+
+### 准备工作
+
+1. **环境变量配置**：
+
+创建 `.env` 文件并添加必要的环境变量：
+
+```env
+# RPC配置
+NEXT_PUBLIC_RPC_URL=https://mainnet.infura.io/v3/YOUR_INFURA_KEY
+
+# 钱包连接
+NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID=your-wallet-connect-project-id
+
+# IPFS配置（用于NFT项目）
+NEXT_PUBLIC_INFURA_IPFS_PROJECT_ID=your-infura-ipfs-project-id
+NEXT_PUBLIC_INFURA_IPFS_PROJECT_SECRET=your-infura-ipfs-project-secret
+
+# 合约地址
+NEXT_PUBLIC_DEX_ROUTER_ADDRESS=0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D
+NEXT_PUBLIC_NFT_CONTRACT_ADDRESS=0x1234567890123456789012345678901234567890
+NEXT_PUBLIC_DAO_CONTRACT_ADDRESS=0x1234567890123456789012345678901234567890
+```
+
+### 部署到Vercel
+
+1. **登录Vercel账号**并连接GitHub仓库
+2. **配置项目设置**：
+   - 环境变量：添加上述所有环境变量
+   - 构建命令：保持默认 `npm run build`
+   - 输出目录：保持默认 `.next`
+3. **部署项目**：点击部署按钮，等待构建完成
+4. **自定义域名**（可选）：在设置中配置自定义域名
+
+### 部署到IPFS（去中心化部署）
+
+1. **构建项目**：
+
+```bash
+npm run build
+export OUTPUTDIR=out
+npx next export
+```
+
+2. **上传到IPFS**：
+
+使用IPFS CLI或Web3.Storage、Pinata等服务上传`out`目录
+
+```bash
+# 使用IPFS CLI
+ipfs add -r out/
+```
+
+3. **固定IPFS内容**：确保内容不会被垃圾回收
+
+4. **配置ENS域名**（可选）：将IPFS哈希与ENS域名关联
+
+## 性能优化
+
+1. **智能合约交互优化**：
+   - 批量读取数据以减少RPC调用
+   - 使用缓存减少重复请求
+   - 实现错误重试机制
+
+2. **前端性能优化**：
+   - 使用React.memo和useMemo减少不必要的渲染
+   - 懒加载非关键组件和页面
+   - 优化媒体文件（图片压缩、渐进式加载）
+   - 使用SWR或React Query进行数据缓存和重新验证
+
+3. **Gas优化**：
+   - 使用批量交易减少Gas费用
+   - 优化合约调用以减少Gas消耗
+   - 实现Gas价格预测和优化
+
+## 安全注意事项
+
+1. **智能合约交互**：
+   - 始终验证合约地址的正确性
+   - 实现交易参数验证
+   - 添加交易风险提示
+
+2. **钱包安全**：
+   - 不要在前端存储私钥或助记词
+   - 使用官方钱包库进行连接
+   - 实现签名消息验证
+
+3. **防钓鱼措施**：
+   - 显示连接的网络和地址
+   - 提供交易预览
+   - 实现授权额度限制
+
+## 总结
+
+本文档详细介绍了三个进阶级Web3项目的实现方案，包括简易Swap应用、NFT铸造平台和DAO投票系统。这些项目涵盖了现代Web3前端开发的核心技术栈和最佳实践，从钱包连接、智能合约交互到用户界面设计和安全防护。
+
+通过这些项目的实践，开发者可以掌握：
+
+1. **区块链交互**：使用Ethers.js和Wagmi与以太坊智能合约交互
+2. **钱包集成**：使用RainbowKit实现流畅的钱包连接体验
+3. **状态管理**：使用Zustand管理应用状态
+4. **去中心化存储**：使用IPFS存储NFT元数据
+5. **安全最佳实践**：实现交易验证、授权管理和错误处理
+
+这些技能将帮助开发者构建安全、高效且用户友好的Web3应用，为区块链生态系统的发展做出贡献。
+
+## 后续扩展建议
+
+1. **多链支持**：扩展应用支持多个区块链网络
+2. **Layer 2优化**：集成Optimism、Arbitrum等L2解决方案降低交易成本
+3. **账户抽象**：实现EIP-4337账户抽象功能，提升用户体验
+4. **数据分析**：添加链上数据分析和可视化功能
+5. **移动响应式**：优化移动设备上的用户体验
+
+希望本文档能够为Web3前端开发者提供有价值的参考和指导，帮助大家构建出更加优秀的去中心化应用。  
+    if (isTransactionSuccess) {
+      setSuccess(`NFT铸造成功! 数量: ${quantity}`);
+      setQuantity(1);
+    }
+  }, [isPrepareError, prepareError, isTransactionError, transactionError, isTransactionSuccess, quantity]);
+
+  // 如果元数据未完成，显示元数据编辑器
+  if (!isMetadataComplete) {
+    return (
+      <div className="max-w-3xl mx-auto">
+        <MetadataEditor onMetadataComplete={handleMetadataComplete} />
+      </div>
+    );
+  }
+
+  // 元数据完成后显示铸造界面
+  return (
+    <div className="max-w-3xl mx-auto">
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 mb-6">
+        <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">NFT铸造</h2>
+        
+        {error && (
+          <div className="bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 p-3 rounded-lg mb-4">
+            {error}
+          </div>
+        )}
+        
+        {success && (
+          <div className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 p-3 rounded-lg mb-4">
+            {success}
+          </div>
+        )}
+
+        {/* 铸造数量选择 */}
+        <div className="mb-4">
+          <label htmlFor="quantity" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            铸造数量
+          </label>
+          <div className="flex items-center space-x-2">
+            <button
+              type="button"
+              onClick={() => setQuantity(prev => Math.max(1, prev - 1))}
+              className="w-10 h-10 flex items-center justify-center border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+              disabled={quantity <= 1}
+            >
+              -
+            </button>
+            <input
+              type="number"
+              id="quantity"
+              value={quantity}
+              onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+              min="1"
+              className="flex-1 p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-center"
+            />
+            <button
+              type="button"
+              onClick={() => setQuantity(prev => Math.min(10, prev + 1))}
+              className="w-10 h-10 flex items-center justify-center border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+              disabled={quantity >= 10}
+            >
+              +
+            </button>
+          </div>
+        </div>
+
+        {/* 铸造按钮 */}
+        <button
+          onClick={handleMint}
+          disabled={!address || !metadataUri || isWritePending || isTransactionLoading}
+          className={`w-full py-3 rounded-lg text-white transition-colors ${(
+            !address || !metadataUri
+          ) ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-500 hover:bg-green-600'}`}
+        >
+          {isWritePending || isTransactionLoading ? (
+            <span className="flex items-center justify-center">
+              <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              铸造中...
+            </span>
+          ) : (
+            `铸造 ${quantity} 个NFT`
+          )}
+        </button>
+      </div>
+
+      {/* 重置按钮 */}
+      <div className="text-center">
+        <button
+          onClick={() => {
+            setIsMetadataComplete(false);
+            setMetadataUri('');
+            setError('');
+            setSuccess('');
+          }}
+          className="text-blue-500 hover:text-blue-700"
+        >
+          创建新的NFT
+        </button>
+      </div>
+    </div>
+  );
+};
+
+export default MintNFT;
+```
+
+### 安全最佳实践
+
+1. **合约地址验证**：确保与正确的NFT合约交互
+2. **铸造数量限制**：设置最大铸造数量，防止批量铸造攻击
+3. **元数据验证**：验证上传的媒体文件格式和大小
+4. **交易确认流程**：提供清晰的交易预览和确认步骤
+5. **错误处理**：优雅处理各类铸造异常，提供明确的错误信息
+
+### 测试要点
+
+1. **元数据上传**：测试不同类型和大小的媒体文件上传
+2. **属性编辑**：验证属性添加、删除和编辑功能
+3. **铸造流程**：在测试网完成铸造流程测试
+4. **批量铸造**：测试多数量铸造功能
+5. **错误场景**：测试网络中断、用户拒绝交易等异常情况
+
+## 项目三：DAO投票系统
+
+### 项目概述
+
+构建一个基础的去中心化自治组织（DAO）投票系统，允许代币持有者创建提案、投票表决，并跟踪提案状态。系统需实现基于代币持有量的投票权重计算、提案时间限制和结果统计。
+
+### 核心功能设计
+
+1. **提案创建**：允许用户创建包含标题、描述和选项的投票提案
+2. **投票权重**：基于用户持有的治理代币数量计算投票权重
+3. **投票功能**：允许用户对提案进行投票
+4. **结果统计**：实时统计和显示投票结果
+5. **提案追踪**：跟踪提案的创建、投票和完成状态
+
+### 技术实现
+
+#### 1. 投票状态管理
+
+```typescript
+// store/daoStore.ts
+import { create } from 'zustand';
+import { Address } from 'viem';
+
+interface Proposal {
+  id: number;
+  title: string;
+  description: string;
+  options: string[];
+  voteCounts: number[];
+  startDate: number;
+  endDate: number;
+  creator: Address;
+  status: 'active' | 'completed';
+}
+
+interface DAOStore {
+  proposals: Proposal[];
+  userVotes: Record<number, number>; // proposalId -> optionIndex
+  userTokenBalance: string;
+  isLoading: boolean;
+  error: string | null;
+  fetchProposals: () => Promise<void>;
+  fetchUserVotes: (address: Address) => Promise<void>;
+  fetchUserTokenBalance: (address: Address) => Promise<void>;
+  createProposal: (title: string, description: string, options: string[], durationDays: number) => Promise<void>;
+  castVote: (proposalId: number, optionIndex: number) => Promise<void>;
+}
+
+export const useDAOStore = create<DAOStore>((set, get) => ({
+  proposals: [],
+  userVotes: {},
+  userTokenBalance: '0',
+  isLoading: false,
+  error: null,
+  
+  fetchProposals: async () => {
+    // 实现获取提案列表的逻辑
+  },
+  
+  fetchUserVotes: async (address) => {
+    // 实现获取用户投票记录的逻辑
+  },
+  
+  fetchUserTokenBalance: async (address) => {
+    // 实现获取用户代币余额的逻辑
+  },
+  
+  createProposal: async (title, description, options, durationDays) => {
+    // 实现创建提案的逻辑
+  },
+  
+  castVote: async (proposalId, optionIndex) => {
+    // 实现投票逻辑
+  },
+}));
+```
+
+#### 2. 提案列表组件
+
+```tsx
+// components/DAO/ProposalList.tsx
+'use client';
+import { useEffect } from 'react';
+import { useAccount } from 'wagmi';
+import { useDAOStore } from '@/store/daoStore';
+import ProposalCard from './ProposalCard';
+
+const ProposalList: React.FC = () => {
+  const { address } = useAccount();
+  const { 
+    proposals, 
+    userVotes, 
+    userTokenBalance, 
+    isLoading, 
+    error,
+    fetchProposals,
+    fetchUserVotes,
+    fetchUserTokenBalance
+  } = useDAOStore();
+
+  // 加载提案数据
+  useEffect(() => {
+    const loadData = async () => {
+      await fetchProposals();
+      if (address) {
+        await Promise.all([
+          fetchUserVotes(address),
+          fetchUserTokenBalance(address)
+        ]);
+      }
+    };
+    loadData();
+  }, [address]);
+
+  // 根据提案状态过滤
+  const activeProposals = proposals.filter(p => p.status === 'active');
+  const completedProposals = proposals.filter(p => p.status === 'completed');
+
+  if (isLoading) {
+    return <div className="text-center py-10">加载中...</div>;
+  }
+
+  if (error) {
+    return <div className="text-center py-10 text-red-500">{error}</div>;
+  }
+
+  return (
+    <div className="space-y-8">
+      {/* 用户信息 */}
+      {address && (
+        <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border border-blue-100 dark:border-blue-800">
+          <div className="text-sm text-gray-700 dark:text-gray-300">
+            <div className="flex justify-between">
+              <span>钱包地址:</span>
+              <span className="font-mono truncate max-w-[60%] text-right">
+                {address.slice(0, 6)}...{address.slice(-4)}
+              </span>
+            </div>
+            <div className="mt-1 flex justify-between">
+              <span>治理代币余额:</span>
+              <span className="font-medium">{userTokenBalance}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 活跃提案 */}
+      <div>
+        <h2 className="text-2xl font-bold mb-4 text-gray-900 dark:text-white">活跃提案</h2>
+        {activeProposals.length === 0 ? (
+          <p className="text-gray-600 dark:text-gray-400">目前没有活跃提案</p>
+        ) : (
+          <div className="space-y-4">
+            {activeProposals.map(proposal => (
+              <ProposalCard 
+                key={proposal.id}
+                proposal={proposal}
+                userVote={userVotes[proposal.id]}
+                userTokenBalance={parseFloat(userTokenBalance)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* 已完成提案 */}
+      <div>
+        <h2 className="text-2xl font-bold mb-4 text-gray-900 dark:text-white">已完成提案</h2>
+        {completedProposals.length === 0 ? (
+          <p className="text-gray-600 dark:text-gray-400">目前没有已完成的提案</p>
+        ) : (
+          <div className="space-y-4">
+            {completedProposals.map(proposal => (
+              <ProposalCard 
+                key={proposal.id}
+                proposal={proposal}
+                userVote={userVotes[proposal.id]}
+                userTokenBalance={parseFloat(userTokenBalance)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default ProposalList;
+```
+
+#### 3. 提案卡片组件
+
+```tsx
+// components/DAO/ProposalCard.tsx
+import { useState } from 'react';
+import { useDAOStore } from '@/store/daoStore';
+import { format } from 'date-fns';
+
+interface ProposalProps {
+  proposal: {
+    id: number;
+    title: string;
+    description: string;
+    options: string[];
+    voteCounts: number[];
+    startDate: number;
+    endDate: number;
+    creator: string;
+    status: 'active' | 'completed';
+  };
+  userVote: number | undefined;
+  userTokenBalance: number;
+}
+
+const ProposalCard: React.FC<ProposalProps> = ({ proposal, userVote, userTokenBalance }) => {
+  const { castVote } = useDAOStore();
+  const [selectedOption, setSelectedOption] = useState<number | null>(null);
+  const [isVoting, setIsVoting] = useState(false);
+  const [voteError, setVoteError] = useState('');
+  const [showDetails, setShowDetails] = useState(false);
+
+  // 计算总票数
+  const totalVotes = proposal.voteCounts.reduce((sum, count) => sum + count, 0);
+  
+  // 检查提案是否已过期
+  const isExpired = proposal.endDate < Date.now() / 1000;
+  
+  // 格式化日期
+  const formatDate = (timestamp: number) => {
+    return format(new Date(timestamp * 1000), 'yyyy-MM-dd HH:mm');
+  };
+
+  // 处理投票
+  const handleVote = async () => {
+    if (selectedOption === null || !proposal.id) return;
+    
+    setIsVoting(true);
+    setVoteError('');
+    
+    try {
+      await castVote(proposal.id, selectedOption);
+    } catch (error) {
+      console.error('投票失败:', error);
+      setVoteError('投票失败，请稍后再试');
+    } finally {
+      setIsVoting(false);
+    }
+  };
+
+  // 检查用户是否可以投票
+  const canVote = proposal.status === 'active' && !isExpired && userVote === undefined && userTokenBalance > 0;
+
+  // 计算获胜选项
+  const getWinningOption = () => {
+    if (totalVotes === 0) return -1;
+    let maxVotes = 0;
+    let winningIndex = 0;
+    
+    proposal.voteCounts.forEach((count, index) => {
+      if (count > maxVotes) {
+        maxVotes = count;
+        winningIndex = index;
+      }
+    });
+    
+    return winningIndex;
+  };
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden border border-gray-200 dark:border-gray-700">
+      <div className="p-5">
+        {/* 提案标题 */}
+        <div className="flex items-start justify-between">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
+            {proposal.title}
+          </h3>
+          <span className={`text-sm px-2 py-1 rounded-full ${(
+            isExpired || proposal.status === 'completed'
+          ) ? 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200' : 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'}`}>
+            {isExpired || proposal.status === 'completed' ? '已完成' : '进行中'}
+          </span>
+        </div>
+        
+        {/* 提案描述 */}
+        <p className={`text-gray-600 dark:text-gray-400 text-sm mb-4 ${!showDetails && proposal.description.length > 100 ? 'line-clamp-2' : ''}`}>
+          {proposal.description}
+        </p>
+        
+        {proposal.description.length > 100 && (
+          <button 
+            onClick={() => setShowDetails(!showDetails)}
+            className="text-blue-500 hover:text-blue-700 text-sm mb-4"
+          >
+            {showDetails ? '收起' : '展开详情'}
+          </button>
+        )}
+        
+        {/* 提案信息 */}
+        <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs text-gray-500 dark:text-gray-400 mb-4">
+          <span>提案ID: {proposal.id}</span>
+          <span>创建者: {proposal.creator.slice(0, 6)}...{proposal.creator.slice(-4)}</span>
+          <span>开始时间: {formatDate(proposal.startDate)}</span>
+          <span>结束时间: {formatDate(proposal.endDate)}</span>
+        </div>
+        
+        {/* 投票选项 */}
+        <div className="space-y-3 mb-4">
+          {proposal.options.map((option, index) => {
+            const votePercentage = totalVotes > 0 ? (proposal.voteCounts[index] / totalVotes) * 100 : 0;
+            const isWinning = proposal.status === 'completed' && index === getWinningOption();
+            const isUserVote = userVote === index;
+            
+            return (
+              <div key={index} className="space-y-1">
+                <div className="flex justify-between text-sm">
+                  <label className={`flex items-center ${isWinning ? 'font-bold text-green-600 dark:text-green-400' : 'text-gray-700 dark:text-gray-300'}`}>
+                    {canVote && (
+                      <input
+                        type="radio"
+                        name={`proposal-${proposal.id}`}
+                        value={index}
+                        checked={selectedOption === index}
+                        onChange={() => setSelectedOption(index)}
+                        className="mr-2"
+                      />
+                    )}
+                    {option}
+                    {isWinning && proposal.status === 'completed' && totalVotes > 0 && (
+                      <span className="ml-2 text-xs px-1 py-0.5 bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 rounded">
+                        获胜
+                      </span>
+                    )}
+                    {isUserVote && (
+                      <span className="ml-2 text-xs px-1 py-0.5 bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 rounded">
+                        你的投票
+                      </span>
+                    )}
+                  </label>
+                  <span className="text-gray-600 dark:text-gray-400">
+                    {proposal.voteCounts[index]} 票 ({votePercentage.toFixed(1)}%)
+                  </span>
+                </div>
+                
+                {/* 进度条 */}
+                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                  <div 
+                    className={`h-2 rounded-full ${(
+                      isWinning ? 'bg-green-500' : 
+                      isUserVote ? 'bg-blue-500' : 'bg-blue-400'
+                    )}`}
+                    style={{ width: `${votePercentage}%` }}
+                  ></div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        
+        {/* 投票按钮 */}
+        {canVote && (
+          <div className="space-y-2">
+            {voteError && (
+              <div className="text-sm text-red-600 dark:text-red-400">{voteError}</div>
+            )}
+            <button
+              onClick={handleVote}
+              disabled={selectedOption === null || isVoting}
+              className={`w-full py-2 rounded-lg text-white transition-colors ${(
+                selectedOption === null ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-500 hover:bg-blue-600'
+              )}`}
+            >
+              {isVoting ? '投票中...' : `投票 (权重: ${userTokenBalance.toFixed(2)})`}
+            </button>
+          </div>
+        )}
+        
+        {/* 已投票提示 */}
+        {userVote !== undefined && (
+          <div className="text-center text-sm text-gray-500 dark:text-gray-400 py-2">
+            你已经投票给: {proposal.options[userVote]}
+          </div>
+        )}
+        
+        {/* 无代币提示 */}
+        {proposal.status === 'active' && !isExpired && userVote === undefined && userTokenBalance === 0 && (
+          <div className="text-center text-sm text-yellow-600 dark:text-yellow-400 py-2">
+            你没有足够的治理代币来投票
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default ProposalCard;
+```
+
+#### 4. 创建提案组件
+
+```tsx
+// components/DAO/CreateProposal.tsx
+'use client';
+import { useState } from 'react';
+import { useAccount } from 'wagmi';
+import { useDAOStore } from '@/store/daoStore';
+
+const CreateProposal: React.FC = () => {
+  const { address } = useAccount();
+  const { createProposal } = useDAOStore();
+  
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [options, setOptions] = useState(['', '']);
+  const [durationDays, setDurationDays] = useState(3);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  const handleOptionChange = (index: number, value: string) => {
+    const newOptions = [...options];
+    newOptions[index] = value;
+    setOptions(newOptions);
+  };
+
+  const addOption = () => {
+    if (options.length < 5) { // 最多5个选项
+      setOptions([...options, '']);
+    }
+  };
+
+  const removeOption = (index: number) => {
+    if (options.length > 2) { // 至少保留2个选项
+      const newOptions = options.filter((_, i) => i !== index);
+      setOptions(newOptions);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    // 表单验证
+    if (!title.trim()) {
+      setError('请输入提案标题');
+      return;
+    }
+    
+    if (!description.trim()) {
+      setError('请输入提案描述');
+      return;
+    }
+    
+    // 验证所有选项都有值
+    const hasEmptyOption = options.some(option => !option.trim());
+    if (hasEmptyOption) {
+      setError('请填写所有投票选项');
+      return;
+    }
+    
+    // 验证选项不重复
+    const uniqueOptions = new Set(options.map(o => o.trim()));
+    if (uniqueOptions.size !== options.length) {
+      setError('投票选项不能重复');
+      return;
+    }
+    
+    setIsSubmitting(true);
+    setError('');
+    setSuccess('');
+    
+    try {
+      await createProposal(title, description, options.map(o => o.trim()), durationDays);
+      setSuccess('提案创建成功！');
+      
+      // 重置表单
+      setTitle('');
+      setDescription('');
+      setOptions(['', '']);
+      setDurationDays(3);
+    } catch (err) {
+      console.error('创建提案失败:', err);
+      setError('提案创建失败，请稍后再试');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  if (!address) {
+    return (
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 text-center">
+        <p className="text-gray-600 dark:text-gray-400">请先连接钱包以创建提案</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 mb-8">
+      <h2 className="text-2xl font-bold mb-6 text-gray-900 dark:text-white">创建新提案</h2>
+      
+      {error && (
+        <div className="bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 p-3 rounded-lg mb-4">
+          {error}
+        </div>
+      )}
+      
+      {success && (
+        <div className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 p-3 rounded-lg mb-4">
+          {success}
+        </div>
+      )}
+      
+      <form onSubmit={handleSubmit}>
+        {/* 提案标题 */}
+        <div className="mb-4">
+          <label htmlFor="title" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            提案标题 *
+          </label>
+          <input
+            type="text"
+            id="title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            placeholder="请输入提案标题"
+            maxLength={100}
+          />
+          <p className="text-xs text-gray-500 mt-1">{title.length}/100</p>
+        </div>
+        
+        {/* 提案描述 */}
+        <div className="mb-4">
+          <label htmlFor="description" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            提案描述 *
+          </label>
+          <textarea
+            id="description"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 h-32"
+            placeholder="请详细描述您的提案..."
+            maxLength={1000}
+          />
+          <p className="text-xs text-gray-500 mt-1">{description.length}/1000</p>
+        </div>
+        
+        {/* 投票选项 */}
+        <div className="mb-6">
+          <div className="flex justify-between items-center mb-2">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+              投票选项 *
+            </label>
+            <button
+              type="button"
+              onClick={addOption}
+              disabled={options.length >= 5}
+              className={`text-sm px-3 py-1 rounded ${(
+                options.length >= 5 ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : 'bg-blue-500 hover:bg-blue-600 text-white'
+              )}`}
+            >
+              添加选项
+            </button>
+          </div>
+          
+          {options.map((option, index) => (
+            <div key={index} className="flex space-x-2 mb-2">
+              <input
+                type="text"
+                value={option}
+                onChange={(e) => handleOptionChange(index, e.target.value)}
+                className="flex-1 p-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder={`选项 ${index + 1}`}
+                maxLength={50}
+              />
+              <button
+                type="button"
+                onClick={() => removeOption(index)}
+                disabled={options.length <= 2}
+                className={`p-3 border border-gray-300 dark:border-gray-600 rounded-lg ${(
+                  options.length <= 2 ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'hover:bg-gray-100 dark:hover:bg-gray-700'
+                )}`}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+        
+        {/* 投票持续时间 */}
+        <div className="mb-6">
+          <label htmlFor="duration" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            投票持续时间 (天) *
+          </label>
+          <div className="flex items-center space-x-2">
+            <button
+              type="button"
+              onClick={() => setDurationDays(prev => Math.max(1, prev - 1))}
+              className="w-10 h-10 flex items-center justify-center border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+              disabled={durationDays <= 1}
+            >
+              -
+            </button>
+            <input
+              type="number"
+              id="duration"
+              value={durationDays}
+              onChange={(e) => setDurationDays(Math.max(1, Math.min(30, parseInt(e.target.value) || 1)))}
+              min="1"
+              max="30"
+              className="flex-1 p-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-center"
+            />
+            <button
+              type="button"
+              onClick={() => setDurationDays(prev => Math.min(30, prev + 1))}
+              className="w-10 h-10 flex items-center justify-center border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+              disabled={durationDays >= 30}
+            >
+              +
+            </button>
+          </div>
+        </div>
+        
+        {/* 提交按钮 */}
+        <button
+          type="submit"
